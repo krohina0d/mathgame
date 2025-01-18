@@ -1,15 +1,13 @@
-import { ThemeProvider, createTheme } from '@mui/material';
-import Game from './components/Game';
-import { CssBaseline } from '@mui/material';
+import { Container, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import NumberGame from './components/NumberGame';
 
 const theme = createTheme({
     palette: {
-        mode: 'light',
         primary: {
             main: '#2196f3',
         },
         secondary: {
-            main: '#f44336',
+            main: '#f50057',
         },
     },
 });
@@ -18,7 +16,9 @@ const App = () => {
     return (
         <ThemeProvider theme={theme}>
             <CssBaseline />
-            <Game />
+            <Container>
+                <NumberGame />
+            </Container>
         </ThemeProvider>
     );
 };
