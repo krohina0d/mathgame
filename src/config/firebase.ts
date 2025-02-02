@@ -1,23 +1,28 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getDatabase } from 'firebase/database';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyCJrJxZRudPh3l7CyfcXF7RLTE_H_xRRu0",
+  authDomain: "mathgame-530a3.firebaseapp.com",
+  databaseURL: "https://mathgame-530a3-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "mathgame-530a3",
+  storageBucket: "mathgame-530a3.appspot.com",
+  messagingSenderId: "786070135008",
+  appId: "1:786070135008:web:d8bc978adaab5b4ef9b085"
 };
 
-console.log('Initializing Firebase with config:', {
-  projectId: firebaseConfig.projectId,
-  authDomain: firebaseConfig.authDomain
+// Инициализируем Firebase
+const app = initializeApp(firebaseConfig);
+
+// Получаем экземпляры сервисов
+export const auth = getAuth(app);
+export const db = getDatabase(app);
+export const googleProvider = new GoogleAuthProvider();
+
+// Настраиваем провайдер Google
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
 });
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-console.log('Firebase initialized successfully');
-
-export { db }; 
+console.log('Firebase Realtime Database initialized successfully'); 

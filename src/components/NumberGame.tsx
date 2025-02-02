@@ -1,8 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Box, Typography, Paper, Grid, Button, ButtonGroup } from '@mui/material';
+import { Box, Typography, Paper, Grid, Button, ButtonGroup, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab, TableContainer, Table, TableHead, TableBody, TableRow, TableCell } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { Cell, GameState, LEVELS, Pair } from '../types/types';
+import { Cell, GameState, LEVELS, Pair, GAME_TIME, CORRECT_POINTS, MISTAKE_PENALTY, LeaderboardEntry, User } from '../types/types';
 import GameCharacter from './GameCharacter';
+import AuthDialog from './AuthDialog';
+import Leaderboard from './Leaderboard';
+import { saveUser, getUser, saveLeaderboardEntry, getLeaderboardEntries } from '../services/storage';
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 
 const StyledCell = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(2),
@@ -18,6 +22,80 @@ const StyledCell = styled(Paper)(({ theme }) => ({
   },
 }));
 
+const InlineLeaderboard = ({ entries, currentLevel }: { entries: LeaderboardEntry[]; currentLevel: number }) => {
+  const filteredEntries = entries
+    .filter(entry => entry.level === currentLevel)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10); // Показываем только топ-10
+
+  return (
+    <Paper sx={{ 
+      p: 2, 
+      borderRadius: 2,
+      bgcolor: 'background.paper',
+      boxShadow: 3,
+      width: '300px',
+      position: 'sticky',
+      top: 20
+    }}>
+      <Typography variant="h6" sx={{ 
+        textAlign: 'center', 
+        mb: 2,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 1
+      }}>
+        <EmojiEventsIcon color="primary" />
+        Рекорды уровня {currentLevel}
+      </Typography>
+
+      {filteredEntries.length === 0 ? (
+        <Typography variant="body2" sx={{ textAlign: 'center', color: 'text.secondary', py: 2 }}>
+          Пока нет результатов для уровня {currentLevel}
+        </Typography>
+      ) : (
+        <TableContainer sx={{ maxHeight: '500px' }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Место</TableCell>
+                <TableCell>Игрок</TableCell>
+                <TableCell align="right">Очки</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredEntries.map((entry, index) => (
+                <TableRow
+                  key={`${entry.userId}-${entry.timestamp}`}
+                  sx={{
+                    bgcolor: index < 3 ? `rgba(255, 215, 0, ${0.1 - index * 0.02})` : 'inherit'
+                  }}
+                >
+                  <TableCell>
+                    {index < 3 ? ['🥇', '🥈', '🥉'][index] : index + 1}
+                  </TableCell>
+                  <TableCell sx={{ 
+                    maxWidth: '120px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {entry.displayName}
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                    {entry.score}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Paper>
+  );
+};
+
 const NumberGame = () => {
   const [attempt, setAttempt] = useState(0);
   const [board, setBoard] = useState<Cell[][]>([]);
@@ -27,9 +105,17 @@ const NumberGame = () => {
     score: 0,
     lastAttemptSuccess: null,
     level: 1,
-    foundPairs: []
+    foundPairs: [],
+    isTimeMode: false,
+    timeLeft: GAME_TIME,
+    totalFoundPairs: 0,
+    user: getUser()
   });
   const [showAllPairs, setShowAllPairs] = useState(false);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [showAuthDialog, setShowAuthDialog] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
 
   const currentLevelConfig = LEVELS[gameState.level];
 
@@ -140,13 +226,88 @@ const NumberGame = () => {
     initializeGame();
   }, [gameState.level]);
 
+  useEffect(() => {
+    let timer: number;
+    if (gameState.isTimeMode && gameState.timeLeft > 0) {
+      timer = window.setInterval(() => {
+        setGameState(prev => ({
+          ...prev,
+          timeLeft: prev.timeLeft - 1
+        }));
+      }, 1000);
+    }
+    return () => window.clearInterval(timer);
+  }, [gameState.isTimeMode, gameState.timeLeft]);
+
+  useEffect(() => {
+    const loadLeaderboard = async () => {
+      const entries = await getLeaderboardEntries();
+      setLeaderboardEntries(entries);
+    };
+    loadLeaderboard();
+  }, []);
+
+  useEffect(() => {
+    const handleTimeEnd = async () => {
+      if (gameState.isTimeMode && gameState.timeLeft === 0 && gameState.user) {
+        // Сначала показываем модальное окно
+        setShowResultModal(true);
+
+        try {
+          // Создаем запись для таблицы рекордов
+          const entry: LeaderboardEntry = {
+            userId: gameState.user.id,
+            displayName: gameState.user.displayName || `${gameState.user.firstName} ${gameState.user.lastName}`,
+            score: gameState.score,
+            level: gameState.level,
+            foundPairs: gameState.totalFoundPairs,
+            timestamp: Date.now()
+          };
+          
+          // Сохраняем результат
+          await saveLeaderboardEntry(entry);
+          
+          // Обновляем таблицу рекордов
+          const updatedEntries = await getLeaderboardEntries();
+          setLeaderboardEntries(updatedEntries);
+        } catch (error) {
+          console.error('Error saving game result:', error);
+        }
+      }
+    };
+
+    if (gameState.timeLeft === 0) {
+      handleTimeEnd();
+    }
+  }, [gameState.timeLeft, gameState.isTimeMode, gameState.user, gameState.score, gameState.level, gameState.totalFoundPairs]);
+
   const handleLevelChange = (newLevel: number) => {
     setGameState(prev => ({
       ...prev,
       level: newLevel,
+      score: 0,
+      isTimeMode: false,
+      timeLeft: GAME_TIME
+    }));
+    setAttempt(0);
+    setShowAllPairs(false);
+  };
+
+  const toggleTimeMode = () => {
+    if (!gameState.user) {
+      setShowAuthDialog(true);
+      return;
+    }
+
+    setGameState(prev => ({
+      ...prev,
+      isTimeMode: !prev.isTimeMode,
+      timeLeft: GAME_TIME,
       score: 0
     }));
     setAttempt(0);
+    setShowAllPairs(false);
+    initializeGame();
   };
 
   const isAdjacent = (cell1: Cell, cell2: Cell): boolean => {
@@ -156,6 +317,8 @@ const NumberGame = () => {
   };
 
   const handleCellClick = useCallback((cell: Cell) => {
+    if (gameState.isTimeMode && gameState.timeLeft === 0) return;
+
     setGameState(prevState => {
       const selectedCells = [...prevState.selectedCells];
 
@@ -172,7 +335,6 @@ const NumberGame = () => {
           const sum = selectedCells[0].value + cell.value;
           const diff = Math.abs(selectedCells[0].value - cell.value);
 
-          // Проверяем, является ли эта пара новой найденной парой
           const pairIndex = prevState.foundPairs.findIndex(
             pair => !pair.found && 
             ((pair.cell1.row === selectedCells[0].row && 
@@ -191,11 +353,9 @@ const NumberGame = () => {
             const newFoundPairs = [...prevState.foundPairs];
             newFoundPairs[pairIndex] = { ...newFoundPairs[pairIndex], found: true };
 
-            // Проверяем, найдены ли все пары
             const allFound = newFoundPairs.every(pair => pair.found);
             
             if (allFound) {
-              // Если все пары найдены, готовим новую игру
               setTimeout(() => {
                 initializeGame();
               }, 1000);
@@ -205,8 +365,9 @@ const NumberGame = () => {
               ...prevState,
               foundPairs: newFoundPairs,
               selectedCells: [],
-              score: prevState.score + 1,
-              lastAttemptSuccess: true
+              score: prevState.score + (prevState.isTimeMode ? CORRECT_POINTS : 1),
+              lastAttemptSuccess: true,
+              totalFoundPairs: prevState.totalFoundPairs + 1
             };
           }
         }
@@ -214,13 +375,14 @@ const NumberGame = () => {
         return { 
           ...prevState, 
           selectedCells: [],
-          lastAttemptSuccess: false 
+          lastAttemptSuccess: false,
+          score: prevState.isTimeMode ? prevState.score + MISTAKE_PENALTY : prevState.score
         };
       }
 
       return { ...prevState, selectedCells: [] };
     });
-  }, [initializeGame]);
+  }, [initializeGame, gameState.isTimeMode, gameState.timeLeft]);
 
   const handleContinue = useCallback(() => {
     setShowAllPairs(false);
@@ -283,6 +445,39 @@ const NumberGame = () => {
     }
     return count;
   }, []);
+
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const handlePlayAgain = () => {
+    setShowResultModal(false);
+    setGameState(prev => ({
+      ...prev,
+      score: 0,
+      timeLeft: GAME_TIME,
+      foundPairs: [],
+      totalFoundPairs: 0,
+      isTimeMode: false
+    }));
+    initializeGame();
+  };
+
+  const handleAuth = (user: User) => {
+    saveUser(user);
+    setGameState(prev => ({
+      ...prev,
+      user,
+      isTimeMode: true,
+      timeLeft: GAME_TIME,
+      score: 0
+    }));
+    setAttempt(0);
+    setShowAllPairs(false);
+    initializeGame();
+  };
 
   if (board.length === 0) {
     return null;
@@ -420,7 +615,9 @@ const NumberGame = () => {
       <Box sx={{ 
         display: 'flex',
         justifyContent: 'center',
-        mb: 4
+        gap: 2,
+        mb: 4,
+        flexWrap: 'wrap'
       }}>
         <ButtonGroup 
           variant="contained" 
@@ -441,162 +638,307 @@ const NumberGame = () => {
             </Button>
           ))}
         </ButtonGroup>
-      </Box>
 
-      <Box sx={{ 
-        mb: 4, 
-        p: 3, 
-        bgcolor: 'info.light', 
-        borderRadius: 2,
-        border: '2px solid #2196f3',
-        boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
-      }}>
-        <Typography variant="h6" gutterBottom sx={{ color: 'primary.dark' }}>
-          Как играть? 🤔
-        </Typography>
-        <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 2 }}>
-          Привет! Давай поиграем в поиск волшебных пар чисел! 🔍
-        </Typography>
-        <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
-          Правила простые:
-        </Typography>
-        <Box sx={{ pl: 2, mb: 2 }}>
-          <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
-            • Выбери два числа, которые стоят рядом (по вертикали ⬆️⬇️ или горизонтали ⬅️➡️)
-          </Typography>
-          <Typography variant="body1" sx={{ fontSize: '1.1rem' }}>
-            • Эти числа должны быть волшебными: если их сложить (+) ИЛИ если из большего вычесть меньшее (-), 
-              получится заданное число {gameState.targetNumber} ✨
-          </Typography>
-        </Box>
-        <Typography variant="body1" sx={{ 
-          fontSize: '1.1rem', 
-          bgcolor: 'background.paper', 
-          p: 1, 
-          borderRadius: 1,
-          border: '1px dashed primary.main'
-        }}>
-          {(() => {
-            const { additionExample, subtractionExample } = getSimpleExample(gameState.targetNumber);
-            return (
-              <>
-                Например, чтобы получить число {gameState.targetNumber}, можно:<br/>
-                • Найти два числа, которые дают {gameState.targetNumber} при сложении:<br/>
-                  {additionExample.num1} + {additionExample.num2} = {gameState.targetNumber} ✨<br/>
-                • ИЛИ найти два числа, разница между которыми равна {gameState.targetNumber}:<br/>
-                  {subtractionExample.bigNum} - {subtractionExample.smallNum} = {gameState.targetNumber} ✨
-              </>
-            );
-          })()}
-        </Typography>
+        <Button
+          variant="contained"
+          color="secondary"
+          size="large"
+          onClick={() => setShowLeaderboard(true)}
+          sx={{ boxShadow: 3 }}
+        >
+          Таблица рекордов 🏆
+        </Button>
       </Box>
 
       <Box sx={{ 
         display: 'flex',
-        justifyContent: 'center',
-        gap: 3,
-        mb: 3
-      }}>
-        <Paper sx={{ 
-          p: 2,
-          borderRadius: 2,
-          bgcolor: '#1a237e',
-          boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-          minWidth: '200px',
-          textAlign: 'center'
-        }}>
-          <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-            Уровень {gameState.level}
-          </Typography>
-          <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-            Найди число:
-          </Typography>
-          <Typography variant="h4" sx={{ 
-            color: '#fff',
-            fontWeight: 'bold',
-            textShadow: '2px 2px 4px rgba(0,0,0,0.3)'
-          }}>
-            {gameState.targetNumber} 🎯
-          </Typography>
-          <Typography variant="body1" sx={{ color: '#fff', mt: 1, opacity: 0.9 }}>
-            (осталось найти {countPossiblePairs(board, gameState.targetNumber) - gameState.foundPairs.filter(p => p.found).length} пар)
-          </Typography>
-        </Paper>
-        
-        <Paper sx={{ 
-          p: 2,
-          borderRadius: 2,
-          bgcolor: '#2e7d32',
-          boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-          minWidth: '200px',
-          textAlign: 'center'
-        }}>
-          <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-            Твои очки:
-          </Typography>
-          <Typography variant="h4" sx={{ 
-            color: '#fff',
-            fontWeight: 'bold',
-            textShadow: '2px 2px 4px rgba(0,0,0,0.3)'
-          }}>
-            {gameState.score} ⭐
-          </Typography>
-        </Paper>
-      </Box>
-
-      <Box sx={{ 
-        display: 'flex', 
         gap: 4,
-        alignItems: 'flex-start',
-        flexWrap: { xs: 'wrap', md: 'nowrap' }
+        alignItems: 'flex-start'
       }}>
-        <Box sx={{ 
-          width: 'fit-content',
-          margin: '0 auto'
-        }}>
+        <Box sx={{ flex: 1 }}>
           <Box sx={{ 
-            display: 'grid',
-            gridTemplateColumns: `repeat(${currentLevelConfig.size}, 1fr)`,
-            gap: 2,
-            width: 'fit-content'
+            mb: 4, 
+            p: 3, 
+            bgcolor: 'info.light', 
+            borderRadius: 2,
+            border: '2px solid #2196f3',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
           }}>
-            {board.map((row, rowIndex) =>
-              row.map((cell, colIndex) => renderCell(cell))
-            )}
-          </Box>
-          
-          {showAllPairs && (
-            <Box sx={{ 
-              mt: 3, 
-              display: 'flex', 
-              justifyContent: 'center' 
-            }}>
-              <Button
-                variant="contained"
-                color="primary"
-                size="large"
-                onClick={handleContinue}
-                sx={{ minWidth: '200px' }}
-              >
-                Продолжить ➡️
-              </Button>
+            <Typography variant="h6" gutterBottom sx={{ color: 'primary.dark' }}>
+              Как играть? 🤔
+            </Typography>
+            <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 2 }}>
+              Привет! Давай поиграем в поиск волшебных пар чисел! 🔍
+            </Typography>
+            <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
+              Правила простые:
+            </Typography>
+            <Box sx={{ pl: 2, mb: 2 }}>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
+                • Выбери два числа, которые стоят рядом (по вертикали ⬆️⬇️ или горизонтали ⬅️➡️)
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem' }}>
+                • Эти числа должны быть волшебными: если их сложить (+) ИЛИ если из большего вычесть меньшее (-), 
+                  получится заданное число {gameState.targetNumber} ✨
+              </Typography>
             </Box>
-          )}
+            <Typography variant="body1" sx={{ 
+              fontSize: '1.1rem', 
+              bgcolor: 'background.paper', 
+              p: 1, 
+              borderRadius: 1,
+              border: '1px dashed primary.main'
+            }}>
+              {(() => {
+                const { additionExample, subtractionExample } = getSimpleExample(gameState.targetNumber);
+                return (
+                  <>
+                    Например, чтобы получить число {gameState.targetNumber}, можно:<br/>
+                    • Найти два числа, которые дают {gameState.targetNumber} при сложении:<br/>
+                      {additionExample.num1} + {additionExample.num2} = {gameState.targetNumber} ✨<br/>
+                    • ИЛИ найти два числа, разница между которыми равна {gameState.targetNumber}:<br/>
+                      {subtractionExample.bigNum} - {subtractionExample.smallNum} = {gameState.targetNumber} ✨
+                  </>
+                );
+              })()}
+            </Typography>
+          </Box>
+
+          <Box sx={{ 
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 3,
+            mb: 3
+          }}>
+            <Paper sx={{ 
+              p: 2,
+              borderRadius: 2,
+              bgcolor: '#1a237e',
+              boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+              minWidth: '200px',
+              textAlign: 'center'
+            }}>
+              <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
+                Уровень {gameState.level}
+              </Typography>
+              <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
+                Найди число:
+              </Typography>
+              <Typography variant="h4" sx={{ 
+                color: '#fff',
+                fontWeight: 'bold',
+                textShadow: '2px 2px 4px rgba(0,0,0,0.3)'
+              }}>
+                {gameState.targetNumber} 🎯
+              </Typography>
+              <Typography variant="body1" sx={{ color: '#fff', mt: 1, opacity: 0.9 }}>
+                (осталось найти {countPossiblePairs(board, gameState.targetNumber) - gameState.foundPairs.filter(p => p.found).length} пар)
+              </Typography>
+            </Paper>
+            
+            <Paper sx={{ 
+              p: 2,
+              borderRadius: 2,
+              bgcolor: '#2e7d32',
+              boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+              minWidth: '200px',
+              textAlign: 'center'
+            }}>
+              <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
+                Твои очки:
+              </Typography>
+              <Typography variant="h4" sx={{ 
+                color: '#fff',
+                fontWeight: 'bold',
+                textShadow: '2px 2px 4px rgba(0,0,0,0.3)'
+              }}>
+                {gameState.score} ⭐
+              </Typography>
+            </Paper>
+          </Box>
+
+          <Box sx={{ 
+            display: 'flex',
+            gap: 4,
+            alignItems: 'flex-start'
+          }}>
+            <Box>
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                mb: 2,
+                gap: 2
+              }}>
+                <Button
+                  variant="contained"
+                  color={gameState.isTimeMode ? "error" : "success"}
+                  size="large"
+                  onClick={toggleTimeMode}
+                  sx={{ 
+                    minWidth: '200px',
+                    boxShadow: 3,
+                    animation: gameState.isTimeMode ? 'pulse 2s infinite' : 'none',
+                    '@keyframes pulse': {
+                      '0%': { transform: 'scale(1)' },
+                      '50%': { transform: 'scale(1.05)' },
+                      '100%': { transform: 'scale(1)' }
+                    }
+                  }}
+                >
+                  {gameState.isTimeMode ? "Выключить таймер" : "Включить таймер"}
+                </Button>
+
+                {gameState.isTimeMode && (
+                  <Paper sx={{ 
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: gameState.timeLeft < 30 ? 'error.main' : 
+                             gameState.timeLeft < 60 ? 'warning.main' : 'success.main',
+                    color: 'white',
+                    minWidth: '150px',
+                    textAlign: 'center',
+                    transition: 'background-color 0.3s ease',
+                    animation: gameState.timeLeft < 30 ? 'blink 1s infinite' : 'none',
+                    '@keyframes blink': {
+                      '0%': { opacity: 1 },
+                      '50%': { opacity: 0.7 },
+                      '100%': { opacity: 1 }
+                    }
+                  }}>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                      ⏱️ {formatTime(gameState.timeLeft)}
+                    </Typography>
+                  </Paper>
+                )}
+              </Box>
+
+              {gameState.isTimeMode && (
+                <Typography 
+                  variant="body2" 
+                  sx={{ 
+                    mb: 2,
+                    textAlign: 'center',
+                    color: 'info.main',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  🎯 +{CORRECT_POINTS} за верный ответ | ❌ {MISTAKE_PENALTY} за ошибку
+                </Typography>
+              )}
+
+              <Box sx={{ 
+                display: 'grid',
+                gridTemplateColumns: `repeat(${currentLevelConfig.size}, 1fr)`,
+                gap: 2,
+                width: 'fit-content'
+              }}>
+                {board.map((row, rowIndex) =>
+                  row.map((cell, colIndex) => renderCell(cell))
+                )}
+              </Box>
+              
+              {showAllPairs && (
+                <Box sx={{ 
+                  mt: 3, 
+                  display: 'flex', 
+                  justifyContent: 'center' 
+                }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="large"
+                    onClick={handleContinue}
+                    sx={{ minWidth: '200px' }}
+                  >
+                    Продолжить ➡️
+                  </Button>
+                </Box>
+              )}
+            </Box>
+
+            <Box sx={{ flex: '0 0 auto', mt: 10 }}>
+              <GameCharacter 
+                isSuccess={gameState.lastAttemptSuccess}
+                attempt={attempt}
+              />
+            </Box>
+          </Box>
         </Box>
 
         <Box sx={{ 
-          flex: '0 0 auto',
-          minWidth: { xs: '100%', md: '250px' },
-          mt: 10,
-          position: 'relative',
-          zIndex: 1
+          width: '300px',
+          flexShrink: 0,
+          display: { xs: 'none', lg: 'block' }
         }}>
-          <GameCharacter 
-            isSuccess={gameState.lastAttemptSuccess}
-            attempt={attempt}
+          <InlineLeaderboard 
+            entries={leaderboardEntries} 
+            currentLevel={gameState.level}
           />
         </Box>
       </Box>
+
+      <AuthDialog 
+        open={showAuthDialog}
+        onClose={() => setShowAuthDialog(false)}
+        onAuth={handleAuth}
+      />
+
+      <Leaderboard
+        open={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        entries={leaderboardEntries}
+      />
+
+      <Dialog 
+        open={showResultModal} 
+        onClose={() => setShowResultModal(false)}
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            p: 2,
+            minWidth: '300px'
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          textAlign: 'center',
+          fontSize: '1.5rem',
+          fontWeight: 'bold',
+          color: 'primary.main'
+        }}>
+          Время вышло! ⌛
+        </DialogTitle>
+        <DialogContent sx={{ textAlign: 'center', py: 3 }}>
+          <Typography variant="h4" sx={{ mb: 2, color: 'success.main' }}>
+            {gameState.score} ⭐
+          </Typography>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Твой результат
+          </Typography>
+          <Typography variant="body1" sx={{ color: 'text.secondary' }}>
+            Всего найдено пар: {gameState.totalFoundPairs}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ 
+          justifyContent: 'center',
+          pb: 3 
+        }}>
+          <Button
+            variant="contained"
+            color="primary"
+            size="large"
+            onClick={handlePlayAgain}
+            sx={{ 
+              minWidth: '200px',
+              borderRadius: 2,
+              fontSize: '1.1rem'
+            }}
+          >
+            Сыграть снова! 🎮
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
