@@ -5,12 +5,20 @@ export interface Cell {
   isSelected: boolean;
 }
 
+export interface Pair {
+  cell1: Cell;
+  cell2: Cell;
+  type: 'sum' | 'difference';
+  found: boolean;
+}
+
 export interface GameState {
   targetNumber: number;
   selectedCells: Cell[];
   score: number;
   lastAttemptSuccess: boolean | null;
   level: number;
+  foundPairs: Pair[];
 }
 
 export interface LevelConfig {

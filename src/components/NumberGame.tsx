@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Box, Typography, Paper, Grid, Button, ButtonGroup } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { Cell, GameState, LEVELS } from '../types/types';
+import { Cell, GameState, LEVELS, Pair } from '../types/types';
 import GameCharacter from './GameCharacter';
 
 const StyledCell = styled(Paper)(({ theme }) => ({
@@ -26,48 +26,38 @@ const NumberGame = () => {
     selectedCells: [],
     score: 0,
     lastAttemptSuccess: null,
-    level: 1
+    level: 1,
+    foundPairs: []
   });
+  const [showAllPairs, setShowAllPairs] = useState(false);
 
   const currentLevelConfig = LEVELS[gameState.level];
 
-  const findRandomAdjacentPair = (board: Cell[][]): { 
-    pair: [Cell, Cell], 
-    sum: number, 
-    difference: number 
-  } => {
+  const generateTargetNumber = useCallback((board: Cell[][]): number => {
+    // Находим все возможные пары
     const size = board.length;
-    const pairs: [Cell, Cell][] = [];
+    const pairs: { sum: number; difference: number }[] = [];
     
-    // Собираем все соседние пары
     for (let i = 0; i < size; i++) {
       for (let j = 0; j < size; j++) {
         // Проверяем правого соседа
         if (j < size - 1) {
-          pairs.push([board[i][j], board[i][j + 1]]);
+          const sum = board[i][j].value + board[i][j + 1].value;
+          const difference = Math.abs(board[i][j].value - board[i][j + 1].value);
+          pairs.push({ sum, difference });
         }
         // Проверяем нижнего соседа
         if (i < size - 1) {
-          pairs.push([board[i][j], board[i + 1][j]]);
+          const sum = board[i][j].value + board[i + 1][j].value;
+          const difference = Math.abs(board[i][j].value - board[i + 1][j].value);
+          pairs.push({ sum, difference });
         }
       }
     }
 
     // Выбираем случайную пару
     const randomPair = pairs[Math.floor(Math.random() * pairs.length)];
-    const sum = randomPair[0].value + randomPair[1].value;
-    const difference = Math.abs(randomPair[0].value - randomPair[1].value);
-
-    return {
-      pair: randomPair,
-      sum,
-      difference
-    };
-  };
-
-  const generateTargetNumber = useCallback((board: Cell[][]): number => {
-    const { sum, difference } = findRandomAdjacentPair(board);
-    return Math.random() < 0.5 ? sum : difference;
+    return Math.random() < 0.5 ? randomPair.sum : randomPair.difference;
   }, []);
 
   const generateBoard = useCallback((): Cell[][] => {
@@ -89,27 +79,66 @@ const NumberGame = () => {
     return board;
   }, [gameState.level]);
 
-  useEffect(() => {
+  const getAllPairs = useCallback((board: Cell[][], targetNumber: number) => {
+    const size = board.length;
+    const pairs: { cell1: Cell; cell2: Cell; type: 'sum' | 'difference' }[] = [];
+    
+    for (let i = 0; i < size; i++) {
+      for (let j = 0; j < size; j++) {
+        // Проверяем правого соседа
+        if (j < size - 1) {
+          const cell1 = board[i][j];
+          const cell2 = board[i][j + 1];
+          const sum = cell1.value + cell2.value;
+          const diff = Math.abs(cell1.value - cell2.value);
+          
+          if (sum === targetNumber) {
+            pairs.push({ cell1, cell2, type: 'sum' });
+          }
+          if (diff === targetNumber) {
+            pairs.push({ cell1, cell2, type: 'difference' });
+          }
+        }
+        // Проверяем нижнего соседа
+        if (i < size - 1) {
+          const cell1 = board[i][j];
+          const cell2 = board[i + 1][j];
+          const sum = cell1.value + cell2.value;
+          const diff = Math.abs(cell1.value - cell2.value);
+          
+          if (sum === targetNumber) {
+            pairs.push({ cell1, cell2, type: 'sum' });
+          }
+          if (diff === targetNumber) {
+            pairs.push({ cell1, cell2, type: 'difference' });
+          }
+        }
+      }
+    }
+    return pairs;
+  }, []);
+
+  const initializeGame = useCallback(() => {
     const newBoard = generateBoard();
-    setBoard(newBoard);
     const newTargetNumber = generateTargetNumber(newBoard);
+    const allPairs = getAllPairs(newBoard, newTargetNumber).map(pair => ({
+      ...pair,
+      found: false
+    }));
+
+    setBoard(newBoard);
     setGameState(prev => ({
       ...prev,
       targetNumber: newTargetNumber,
       selectedCells: [],
+      foundPairs: allPairs,
       lastAttemptSuccess: null
     }));
-  }, [gameState.level, generateBoard, generateTargetNumber]);
+  }, [generateBoard, generateTargetNumber, getAllPairs]);
 
   useEffect(() => {
-    const newBoard = generateBoard();
-    setBoard(newBoard);
-    const newTargetNumber = generateTargetNumber(newBoard);
-    setGameState(prev => ({
-      ...prev,
-      targetNumber: newTargetNumber
-    }));
-  }, []);
+    initializeGame();
+  }, [gameState.level]);
 
   const handleLevelChange = (newLevel: number) => {
     setGameState(prev => ({
@@ -143,14 +172,38 @@ const NumberGame = () => {
           const sum = selectedCells[0].value + cell.value;
           const diff = Math.abs(selectedCells[0].value - cell.value);
 
-          if (sum === prevState.targetNumber || diff === prevState.targetNumber) {
-            setAttempt(prev => prev + 1);
-            const newBoard = generateBoard();
-            setBoard(newBoard);
-            const newTargetNumber = generateTargetNumber(newBoard);
+          // Проверяем, является ли эта пара новой найденной парой
+          const pairIndex = prevState.foundPairs.findIndex(
+            pair => !pair.found && 
+            ((pair.cell1.row === selectedCells[0].row && 
+              pair.cell1.col === selectedCells[0].col &&
+              pair.cell2.row === cell.row && 
+              pair.cell2.col === cell.col) ||
+             (pair.cell1.row === cell.row && 
+              pair.cell1.col === cell.col &&
+              pair.cell2.row === selectedCells[0].row && 
+              pair.cell2.col === selectedCells[0].col)) &&
+            ((pair.type === 'sum' && sum === prevState.targetNumber) ||
+             (pair.type === 'difference' && diff === prevState.targetNumber))
+          );
+
+          if (pairIndex !== -1) {
+            const newFoundPairs = [...prevState.foundPairs];
+            newFoundPairs[pairIndex] = { ...newFoundPairs[pairIndex], found: true };
+
+            // Проверяем, найдены ли все пары
+            const allFound = newFoundPairs.every(pair => pair.found);
+            
+            if (allFound) {
+              // Если все пары найдены, готовим новую игру
+              setTimeout(() => {
+                initializeGame();
+              }, 1000);
+            }
+
             return {
               ...prevState,
-              targetNumber: newTargetNumber,
+              foundPairs: newFoundPairs,
               selectedCells: [],
               score: prevState.score + 1,
               lastAttemptSuccess: true
@@ -167,16 +220,20 @@ const NumberGame = () => {
 
       return { ...prevState, selectedCells: [] };
     });
+  }, [initializeGame]);
 
-    setBoard(prevBoard => 
-      prevBoard.map(row =>
-        row.map(c => ({
-          ...c,
-          isSelected: c.row === cell.row && c.col === cell.col
-        }))
-      )
-    );
-  }, [board, generateBoard, generateTargetNumber, isAdjacent]);
+  const handleContinue = useCallback(() => {
+    setShowAllPairs(false);
+    const newBoard = generateBoard();
+    setBoard(newBoard);
+    const newTargetNumber = generateTargetNumber(newBoard);
+    setGameState(prev => ({
+      ...prev,
+      targetNumber: newTargetNumber,
+      selectedCells: [],
+      lastAttemptSuccess: null
+    }));
+  }, [generateBoard, generateTargetNumber]);
 
   const getSimpleExample = (targetNumber: number) => {
     // Для сложения
@@ -199,9 +256,160 @@ const NumberGame = () => {
     };
   };
 
+  // Добавим функцию подсчета возможных пар
+  const countPossiblePairs = useCallback((board: Cell[][], targetNumber: number): number => {
+    const size = board.length;
+    let count = 0;
+    
+    for (let i = 0; i < size; i++) {
+      for (let j = 0; j < size; j++) {
+        // Проверяем правого соседа
+        if (j < size - 1) {
+          const sum = board[i][j].value + board[i][j + 1].value;
+          const diff = Math.abs(board[i][j].value - board[i][j + 1].value);
+          if (sum === targetNumber || diff === targetNumber) {
+            count++;
+          }
+        }
+        // Проверяем нижнего соседа
+        if (i < size - 1) {
+          const sum = board[i][j].value + board[i + 1][j].value;
+          const diff = Math.abs(board[i][j].value - board[i + 1][j].value);
+          if (sum === targetNumber || diff === targetNumber) {
+            count++;
+          }
+        }
+      }
+    }
+    return count;
+  }, []);
+
   if (board.length === 0) {
     return null;
   }
+
+  const renderCell = (cell: Cell) => {
+    let borderStyle = {};
+    let backgroundColor = 'background.paper';
+
+    // Проверяем, является ли клетка первой выбранной
+    const isFirstSelected = gameState.selectedCells.length === 1 && 
+      gameState.selectedCells[0].row === cell.row && 
+      gameState.selectedCells[0].col === cell.col;
+
+    if (isFirstSelected) {
+      backgroundColor = 'primary.light';
+    }
+
+    // Проверяем все найденные пары
+    const foundPair = gameState.foundPairs.find(
+      pair => pair.found && 
+      ((pair.cell1.row === cell.row && pair.cell1.col === cell.col) ||
+       (pair.cell2.row === cell.row && pair.cell2.col === cell.col))
+    );
+
+    if (foundPair) {
+      const isFirstCell = foundPair.cell1.row === cell.row && foundPair.cell1.col === cell.col;
+      const isHorizontalPair = foundPair.cell1.row === foundPair.cell2.row;
+      
+      // Генерируем цвет для пары
+      const pairIndex = gameState.foundPairs.indexOf(foundPair);
+      const hue = (pairIndex * 137.508) % 360;
+      const color = `hsl(${hue}, 70%, 50%)`;
+
+      // Определяем стиль рамки
+      if (isHorizontalPair) {
+        if (isFirstCell) {
+          borderStyle = {
+            borderLeft: '4px solid ' + color,
+            borderTop: '4px solid ' + color,
+            borderBottom: '4px solid ' + color,
+            marginRight: '-2px',
+            zIndex: pairIndex + 1,
+          };
+        } else {
+          borderStyle = {
+            borderRight: '4px solid ' + color,
+            borderTop: '4px solid ' + color,
+            borderBottom: '4px solid ' + color,
+            marginLeft: '-2px',
+            zIndex: pairIndex + 1,
+          };
+        }
+      } else {
+        if (isFirstCell) {
+          borderStyle = {
+            borderLeft: '4px solid ' + color,
+            borderRight: '4px solid ' + color,
+            borderTop: '4px solid ' + color,
+            marginBottom: '-2px',
+            zIndex: pairIndex + 1,
+          };
+        } else {
+          borderStyle = {
+            borderLeft: '4px solid ' + color,
+            borderRight: '4px solid ' + color,
+            borderBottom: '4px solid ' + color,
+            marginTop: '-2px',
+            zIndex: pairIndex + 1,
+          };
+        }
+      }
+
+      // Добавляем маркер операции
+      const operationMark = foundPair.type === 'sum' ? '+' : '−';
+      borderStyle = {
+        ...borderStyle,
+        '&::after': {
+          content: `"${operationMark}"`,
+          position: 'absolute',
+          top: isFirstCell ? '-12px' : 'auto',
+          bottom: !isFirstCell ? '-12px' : 'auto',
+          right: isHorizontalPair ? '50%' : '-12px',
+          backgroundColor: color,
+          color: 'white',
+          width: '20px',
+          height: '20px',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '14px',
+          fontWeight: 'bold',
+          transform: isHorizontalPair ? 'translateX(50%)' : 'none',
+          zIndex: pairIndex + 2,
+        }
+      };
+    }
+
+    return (
+      <StyledCell
+        key={`${cell.row}-${cell.col}`}
+        onClick={() => handleCellClick(cell)}
+        elevation={1}
+        sx={{
+          width: '64px',
+          height: '64px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '1.2rem',
+          position: 'relative',
+          transition: 'all 0.3s ease',
+          margin: '2px',
+          ...borderStyle,
+          bgcolor: backgroundColor,
+          '&:hover': {
+            bgcolor: isFirstSelected 
+              ? 'primary.light' 
+              : (Object.keys(borderStyle).length === 0 ? 'grey.100' : 'background.paper')
+          }
+        }}
+      >
+        {cell.value}
+      </StyledCell>
+    );
+  };
 
   return (
     <Box sx={{ p: 3 }}>
@@ -310,6 +518,9 @@ const NumberGame = () => {
           }}>
             {gameState.targetNumber} 🎯
           </Typography>
+          <Typography variant="body1" sx={{ color: '#fff', mt: 1, opacity: 0.9 }}>
+            (осталось найти {countPossiblePairs(board, gameState.targetNumber) - gameState.foundPairs.filter(p => p.found).length} пар)
+          </Typography>
         </Paper>
         
         <Paper sx={{ 
@@ -350,26 +561,27 @@ const NumberGame = () => {
             width: 'fit-content'
           }}>
             {board.map((row, rowIndex) =>
-              row.map((cell, colIndex) => (
-                <StyledCell
-                  key={`${rowIndex}-${colIndex}`}
-                  className={cell.isSelected ? 'selected' : ''}
-                  onClick={() => handleCellClick(cell)}
-                  elevation={1}
-                  sx={{
-                    width: '60px',
-                    height: '60px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1.2rem'
-                  }}
-                >
-                  {cell.value}
-                </StyledCell>
-              ))
+              row.map((cell, colIndex) => renderCell(cell))
             )}
           </Box>
+          
+          {showAllPairs && (
+            <Box sx={{ 
+              mt: 3, 
+              display: 'flex', 
+              justifyContent: 'center' 
+            }}>
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                onClick={handleContinue}
+                sx={{ minWidth: '200px' }}
+              >
+                Продолжить ➡️
+              </Button>
+            </Box>
+          )}
         </Box>
 
         <Box sx={{ 
