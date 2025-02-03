@@ -1,12 +1,20 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Box, Typography, Paper, Grid, Button, ButtonGroup, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab, TableContainer, Table, TableHead, TableBody, TableRow, TableCell } from '@mui/material';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Box, Typography, Paper, Grid, Button, ButtonGroup, Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab, TableContainer, Table, TableHead, TableBody, TableRow, TableCell, Avatar, Menu, MenuItem } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { Cell, GameState, LEVELS, Pair, GAME_TIME, CORRECT_POINTS, MISTAKE_PENALTY, LeaderboardEntry, User } from '../types/types';
+import { Cell, GameState, LEVELS, Pair, GAME_TIME, CORRECT_POINTS, MISTAKE_PENALTY, LeaderboardEntry, User, UserAchievement, ACHIEVEMENTS } from '../types/types';
 import GameCharacter from './GameCharacter';
 import AuthDialog from './AuthDialog';
 import Leaderboard from './Leaderboard';
-import { saveUser, getUser, saveLeaderboardEntry, getLeaderboardEntries } from '../services/storage';
+import { saveUser, getUser, saveLeaderboardEntry, getLeaderboardEntries, getUserAchievements, saveUserAchievement } from '../services/storage';
+import { auth } from '../config/firebase';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import LogoutIcon from '@mui/icons-material/Logout';
+import LoginIcon from '@mui/icons-material/Login';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import ProfileDialog from './ProfileDialog';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import AchievementDialog from './AchievementDialog';
+import { useSnackbar } from 'notistack';
 
 const StyledCell = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(2),
@@ -96,6 +104,51 @@ const InlineLeaderboard = ({ entries, currentLevel }: { entries: LeaderboardEntr
   );
 };
 
+// Добавим компонент для отображения текущей серии
+const StreakCounter = ({ streak }: { streak: number }) => (
+  <Paper
+    sx={{
+      position: 'fixed',
+      right: { xs: 16, lg: 332 }, // 332px = 300px (ширина лидерборда) + 32px (отступ)
+      top: '50%',
+      transform: 'translateY(-50%)',
+      p: 2,
+      borderRadius: 2,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 1,
+      bgcolor: streak > 0 ? 'success.light' : 'background.paper',
+      transition: 'all 0.3s ease',
+      boxShadow: 3,
+      zIndex: 10
+    }}
+  >
+    <Typography variant="h6" sx={{ color: streak > 0 ? 'white' : 'text.primary' }}>
+      Серия
+    </Typography>
+    <Typography 
+      variant="h4" 
+      sx={{ 
+        fontWeight: 'bold',
+        color: streak > 0 ? 'white' : 'text.primary',
+        textShadow: streak > 0 ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
+      }}
+    >
+      {streak}
+    </Typography>
+    <Typography 
+      variant="body2" 
+      sx={{ 
+        color: streak > 0 ? 'white' : 'text.secondary',
+        textAlign: 'center'
+      }}
+    >
+      {streak > 0 ? '🔥 Так держать!' : 'Найди пару чисел'}
+    </Typography>
+  </Paper>
+);
+
 const NumberGame = () => {
   const [attempt, setAttempt] = useState(0);
   const [board, setBoard] = useState<Cell[][]>([]);
@@ -116,6 +169,17 @@ const NumberGame = () => {
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [showProfileDialog, setShowProfileDialog] = useState(false);
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [userAchievements, setUserAchievements] = useState<UserAchievement[]>([]);
+
+  // Добавляем ref для инструкции
+  const instructionsRef = useRef<HTMLDivElement>(null);
+
+  // Добавляем хук useSnackbar
+  const { enqueueSnackbar } = useSnackbar();
 
   const currentLevelConfig = LEVELS[gameState.level];
 
@@ -281,6 +345,16 @@ const NumberGame = () => {
     }
   }, [gameState.timeLeft, gameState.isTimeMode, gameState.user, gameState.score, gameState.level, gameState.totalFoundPairs]);
 
+  useEffect(() => {
+    const loadAchievements = async () => {
+      if (gameState.user) {
+        const achievements = await getUserAchievements(gameState.user.id);
+        setUserAchievements(achievements);
+      }
+    };
+    loadAchievements();
+  }, [gameState.user]);
+
   const handleLevelChange = (newLevel: number) => {
     setGameState(prev => ({
       ...prev,
@@ -382,6 +456,13 @@ const NumberGame = () => {
 
       return { ...prevState, selectedCells: [] };
     });
+
+    if (gameState.lastAttemptSuccess) {
+      setCurrentStreak(prev => prev + 1);
+      checkAchievements();
+    } else {
+      setCurrentStreak(0);
+    }
   }, [initializeGame, gameState.isTimeMode, gameState.timeLeft]);
 
   const handleContinue = useCallback(() => {
@@ -410,7 +491,7 @@ const NumberGame = () => {
 
     // Для вычитания (всегда используем числа меньше 10)
     const smallNum = Math.min(3, Math.floor(targetNumber/2));
-    const bigNum = targetNumber + smallNum;
+    const bigNum = targetNumber + smallNum; // Теперь bigNum - smallNum = targetNumber
 
     return {
       additionExample: { num1, num2 },
@@ -470,14 +551,82 @@ const NumberGame = () => {
     setGameState(prev => ({
       ...prev,
       user,
-      isTimeMode: true,
-      timeLeft: GAME_TIME,
       score: 0
     }));
     setAttempt(0);
     setShowAllPairs(false);
     initializeGame();
   };
+
+  const handleMenuClick = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    auth.signOut();
+    setGameState(prev => ({
+      ...prev,
+      user: null,
+      isTimeMode: false,
+      timeLeft: GAME_TIME,
+      score: 0
+    }));
+    handleMenuClose();
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    saveUser(updatedUser);
+    setGameState(prev => ({
+      ...prev,
+      user: updatedUser
+    }));
+  };
+
+  // Функция прокрутки к инструкции
+  const scrollToInstructions = () => {
+    instructionsRef.current?.scrollIntoView({ 
+      behavior: 'smooth',
+      block: 'start'
+    });
+  };
+
+  const checkAchievements = useCallback(async () => {
+    if (!gameState.user || gameState.isTimeMode) return;
+
+    const unlockedAchievements = ACHIEVEMENTS
+      .filter(achievement => 
+        achievement.level === gameState.level &&
+        achievement.requiredStreak <= currentStreak &&
+        !userAchievements.some(ua => 
+          ua.achievementId === achievement.id && 
+          ua.level === gameState.level
+        )
+      );
+
+    for (const achievement of unlockedAchievements) {
+      const newAchievement: UserAchievement = {
+        achievementId: achievement.id,
+        unlockedAt: Date.now(),
+        level: gameState.level
+      };
+      
+      await saveUserAchievement(gameState.user.id, newAchievement);
+      setUserAchievements(prev => [...prev, newAchievement]);
+      
+      // Используем enqueueSnackbar из хука
+      enqueueSnackbar(
+        `🎉 Получено достижение: ${achievement.title}!`,
+        { 
+          variant: 'success',
+          autoHideDuration: 5000
+        }
+      );
+    }
+  }, [currentStreak, gameState.level, gameState.user, gameState.isTimeMode, userAchievements, enqueueSnackbar]);
 
   if (board.length === 0) {
     return null;
@@ -583,12 +732,12 @@ const NumberGame = () => {
         onClick={() => handleCellClick(cell)}
         elevation={1}
         sx={{
-          width: '64px',
-          height: '64px',
+          width: { xs: '48px', sm: '64px' },
+          height: { xs: '48px', sm: '64px' },
+          fontSize: { xs: '1rem', sm: '1.2rem' },
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontSize: '1.2rem',
           position: 'relative',
           transition: 'all 0.3s ease',
           margin: '2px',
@@ -607,108 +756,127 @@ const NumberGame = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom sx={{ color: 'primary.main', textAlign: 'center' }}>
-        Весёлая математика! 🎮
+    <Box sx={{ 
+      p: { xs: 1, sm: 2, md: 3 },
+      maxWidth: '100%',
+      overflow: 'hidden'
+    }}>
+      <Typography variant="h4" gutterBottom sx={{ 
+        color: 'primary.main', 
+        textAlign: 'center',
+        fontWeight: 'bold',
+        fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' }
+      }}>
+        сЧислитель 🎮
       </Typography>
 
       <Box sx={{ 
         display: 'flex',
-        justifyContent: 'center',
-        gap: 2,
-        mb: 4,
-        flexWrap: 'wrap'
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: { xs: 1, sm: 2 },
+        mb: { xs: 2, sm: 4 }
       }}>
-        <ButtonGroup 
-          variant="contained" 
-          color="primary"
-          size="large"
-          sx={{ boxShadow: 3 }}
-        >
-          {Object.keys(LEVELS).map((level) => (
+        <Box sx={{ 
+          display: 'flex',
+          gap: 2,
+          width: '100%',
+          justifyContent: 'center'
+        }}>
+          <Button
+            variant="outlined"
+            color="info"
+            size="medium"
+            onClick={scrollToInstructions}
+            startIcon={<HelpOutlineIcon />}
+            sx={{ 
+              boxShadow: 3,
+              minWidth: { xs: '120px', sm: '150px' }
+            }}
+          >
+            Как играть?
+          </Button>
+
+          {gameState.user && !gameState.isTimeMode && (
             <Button
-              key={level}
-              onClick={() => handleLevelChange(Number(level))}
-              sx={{
-                bgcolor: gameState.level === Number(level) ? 'primary.dark' : 'primary.main',
-                minWidth: '100px'
+              variant="outlined"
+              color="secondary"
+              onClick={() => setShowAchievements(true)}
+              startIcon={<EmojiEventsIcon />}
+              sx={{ 
+                boxShadow: 3,
+                minWidth: { xs: '120px', sm: '150px' }
               }}
             >
-              Уровень {level}
+              Достижения
             </Button>
-          ))}
-        </ButtonGroup>
+          )}
 
-        <Button
-          variant="contained"
-          color="secondary"
-          size="large"
-          onClick={() => setShowLeaderboard(true)}
-          sx={{ boxShadow: 3 }}
-        >
-          Таблица рекордов 🏆
-        </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            size="medium"
+            onClick={() => setShowLeaderboard(true)}
+            startIcon={<EmojiEventsIcon />}
+            sx={{ 
+              boxShadow: 3,
+              minWidth: { xs: '120px', sm: '150px' }
+            }}
+          >
+            Рейтинг
+          </Button>
+        </Box>
+
+        <Box sx={{ 
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 1
+        }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+            Уровень:
+          </Typography>
+          <ButtonGroup 
+            variant="contained" 
+            color="primary"
+            size="medium"
+            sx={{ boxShadow: 3 }}
+          >
+            {Object.keys(LEVELS).map((level) => (
+              <Button
+                key={level}
+                onClick={() => handleLevelChange(Number(level))}
+                sx={{
+                  minWidth: { xs: '45px', sm: '60px' },
+                  bgcolor: gameState.level === Number(level) ? 'primary.dark' : 'primary.main',
+                  '&:hover': {
+                    bgcolor: gameState.level === Number(level) ? 'primary.dark' : 'primary.light',
+                  }
+                }}
+              >
+                {level}
+              </Button>
+            ))}
+          </ButtonGroup>
+        </Box>
       </Box>
 
       <Box sx={{ 
         display: 'flex',
-        gap: 4,
-        alignItems: 'flex-start'
+        gap: { xs: 2, md: 4 },
+        alignItems: 'flex-start',
+        flexDirection: { xs: 'column', lg: 'row' }
       }}>
-        <Box sx={{ flex: 1 }}>
-          <Box sx={{ 
-            mb: 4, 
-            p: 3, 
-            bgcolor: 'info.light', 
-            borderRadius: 2,
-            border: '2px solid #2196f3',
-            boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
-          }}>
-            <Typography variant="h6" gutterBottom sx={{ color: 'primary.dark' }}>
-              Как играть? 🤔
-            </Typography>
-            <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 2 }}>
-              Привет! Давай поиграем в поиск волшебных пар чисел! 🔍
-            </Typography>
-            <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
-              Правила простые:
-            </Typography>
-            <Box sx={{ pl: 2, mb: 2 }}>
-              <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
-                • Выбери два числа, которые стоят рядом (по вертикали ⬆️⬇️ или горизонтали ⬅️➡️)
-              </Typography>
-              <Typography variant="body1" sx={{ fontSize: '1.1rem' }}>
-                • Эти числа должны быть волшебными: если их сложить (+) ИЛИ если из большего вычесть меньшее (-), 
-                  получится заданное число {gameState.targetNumber} ✨
-              </Typography>
-            </Box>
-            <Typography variant="body1" sx={{ 
-              fontSize: '1.1rem', 
-              bgcolor: 'background.paper', 
-              p: 1, 
-              borderRadius: 1,
-              border: '1px dashed primary.main'
-            }}>
-              {(() => {
-                const { additionExample, subtractionExample } = getSimpleExample(gameState.targetNumber);
-                return (
-                  <>
-                    Например, чтобы получить число {gameState.targetNumber}, можно:<br/>
-                    • Найти два числа, которые дают {gameState.targetNumber} при сложении:<br/>
-                      {additionExample.num1} + {additionExample.num2} = {gameState.targetNumber} ✨<br/>
-                    • ИЛИ найти два числа, разница между которыми равна {gameState.targetNumber}:<br/>
-                      {subtractionExample.bigNum} - {subtractionExample.smallNum} = {gameState.targetNumber} ✨
-                  </>
-                );
-              })()}
-            </Typography>
-          </Box>
-
+        <Box sx={{ 
+          flex: 1,
+          width: '100%'
+        }}>
           <Box sx={{ 
             display: 'flex',
             justifyContent: 'center',
-            gap: 3,
-            mb: 3
+            gap: { xs: 1, sm: 3 },
+            mb: 3,
+            flexDirection: { xs: 'column', sm: 'row' }
           }}>
             <Paper sx={{ 
               p: 2,
@@ -759,8 +927,11 @@ const NumberGame = () => {
 
           <Box sx={{ 
             display: 'flex',
-            gap: 4,
-            alignItems: 'flex-start'
+            gap: { xs: 2, md: 4 },
+            alignItems: 'flex-start',
+            mb: 4,
+            flexDirection: { xs: 'column', sm: 'row' },
+            justifyContent: 'center'
           }}>
             <Box>
               <Box sx={{
@@ -830,8 +1001,9 @@ const NumberGame = () => {
               <Box sx={{ 
                 display: 'grid',
                 gridTemplateColumns: `repeat(${currentLevelConfig.size}, 1fr)`,
-                gap: 2,
-                width: 'fit-content'
+                gap: { xs: 1, sm: 2 },
+                width: 'fit-content',
+                margin: '0 auto'
               }}>
                 {board.map((row, rowIndex) =>
                   row.map((cell, colIndex) => renderCell(cell))
@@ -857,17 +1029,72 @@ const NumberGame = () => {
               )}
             </Box>
 
-            <Box sx={{ flex: '0 0 auto', mt: 10 }}>
+            <Box sx={{ 
+              flex: '0 0 auto',
+              mt: { xs: 2, sm: 10 },
+              display: { xs: 'none', sm: 'block' }
+            }}>
               <GameCharacter 
                 isSuccess={gameState.lastAttemptSuccess}
                 attempt={attempt}
               />
             </Box>
           </Box>
+
+          <Box 
+            ref={instructionsRef}
+            sx={{ 
+              p: { xs: 2, sm: 3 },
+              bgcolor: 'info.light', 
+              borderRadius: 2,
+              border: '2px solid #2196f3',
+              boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+              fontSize: { xs: '0.9rem', sm: '1rem' }
+            }}
+          >
+            <Typography variant="h6" gutterBottom sx={{ color: 'primary.dark' }}>
+              Как играть? 🤔
+            </Typography>
+            <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 2 }}>
+              Привет! Давай поиграем в поиск волшебных пар чисел! 🔍
+            </Typography>
+            <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
+              Правила простые:
+            </Typography>
+            <Box sx={{ pl: 2, mb: 2 }}>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem', mb: 1 }}>
+                • Выбери два числа, которые стоят рядом (по вертикали ⬆️⬇️ или горизонтали ⬅️➡️)
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem' }}>
+                • Эти числа должны быть волшебными: если их сложить (+) ИЛИ если из большего вычесть меньшее (-), 
+                  получится заданное число {gameState.targetNumber} ✨
+              </Typography>
+            </Box>
+            <Typography variant="body1" sx={{ 
+              fontSize: '1.1rem', 
+              bgcolor: 'background.paper', 
+              p: 1, 
+              borderRadius: 1,
+              border: '1px dashed primary.main'
+            }}>
+              {(() => {
+                const { additionExample, subtractionExample } = getSimpleExample(gameState.targetNumber);
+                return (
+                  <>
+                    Например, чтобы получить число {gameState.targetNumber}, можно:<br/>
+                    • Найти два числа, которые дают {gameState.targetNumber} при сложении:<br/>
+                      {additionExample.num1} + {additionExample.num2} = {gameState.targetNumber} ✨<br/>
+                    • ИЛИ найти два числа, разница между которыми равна {gameState.targetNumber}:<br/>
+                      {subtractionExample.bigNum} - {subtractionExample.smallNum} = {subtractionExample.bigNum - subtractionExample.smallNum} ✨
+                  </>
+                );
+              })()}
+            </Typography>
+          </Box>
         </Box>
 
         <Box sx={{ 
-          width: '300px',
+          width: { xs: '100%', lg: '300px' },
           flexShrink: 0,
           display: { xs: 'none', lg: 'block' }
         }}>
@@ -877,6 +1104,11 @@ const NumberGame = () => {
           />
         </Box>
       </Box>
+
+      {/* Добавляем счетчик серии */}
+      {!gameState.isTimeMode && (
+        <StreakCounter streak={currentStreak} />
+      )}
 
       <AuthDialog 
         open={showAuthDialog}
@@ -939,6 +1171,113 @@ const NumberGame = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Box sx={{ 
+        position: { xs: 'relative', sm: 'absolute' },
+        top: { xs: 'auto', sm: 16 },
+        right: { xs: 'auto', sm: 16 },
+        mt: { xs: 2, sm: 0 },
+        display: 'flex',
+        justifyContent: { xs: 'center', sm: 'flex-end' },
+        alignItems: 'center',
+        gap: 1
+      }}>
+        {gameState.user ? (
+          <>
+            <Button
+              onClick={handleMenuClick}
+              sx={{ 
+                textTransform: 'none',
+                borderRadius: 2,
+                bgcolor: 'primary.main',
+                color: 'white',
+                '&:hover': {
+                  bgcolor: 'primary.dark'
+                }
+              }}
+              startIcon={
+                <Avatar 
+                  sx={{ 
+                    width: 32, 
+                    height: 32,
+                    bgcolor: 'primary.dark'
+                  }}
+                >
+                  {gameState.user.displayName?.[0] || gameState.user.firstName[0]}
+                </Avatar>
+              }
+            >
+              {gameState.user.displayName || `${gameState.user.firstName} ${gameState.user.lastName}`}
+            </Button>
+            <Menu
+              anchorEl={anchorEl}
+              open={Boolean(anchorEl)}
+              onClose={handleMenuClose}
+              PaperProps={{
+                sx: {
+                  mt: 1,
+                  borderRadius: 2,
+                  minWidth: 200
+                }
+              }}
+            >
+              <MenuItem 
+                onClick={() => {
+                  setShowProfileDialog(true);
+                  handleMenuClose();
+                }}
+                sx={{
+                  gap: 1,
+                  py: 1
+                }}
+              >
+                <AccountCircleIcon color="primary" />
+                <Typography>Редактировать профиль</Typography>
+              </MenuItem>
+              <MenuItem 
+                onClick={handleLogout}
+                sx={{
+                  gap: 1,
+                  py: 1
+                }}
+              >
+                <LogoutIcon color="error" />
+                <Typography color="error">Выйти</Typography>
+              </MenuItem>
+            </Menu>
+          </>
+        ) : (
+          <Button
+            variant="contained"
+            onClick={() => setShowAuthDialog(true)}
+            startIcon={<LoginIcon />}
+            sx={{ 
+              borderRadius: 2,
+              boxShadow: 2
+            }}
+          >
+            Войти
+          </Button>
+        )}
+      </Box>
+
+      {gameState.user && (
+        <ProfileDialog
+          open={showProfileDialog}
+          onClose={() => setShowProfileDialog(false)}
+          user={gameState.user}
+          onUpdate={handleUpdateUser}
+        />
+      )}
+
+      <AchievementDialog
+        open={showAchievements}
+        onClose={() => setShowAchievements(false)}
+        achievements={ACHIEVEMENTS}
+        userAchievements={userAchievements}
+        currentLevel={gameState.level}
+        currentStreak={currentStreak}
+      />
     </Box>
   );
 };

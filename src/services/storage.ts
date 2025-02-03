@@ -1,6 +1,6 @@
 import { db } from '../config/firebase';
 import { ref, push, get, query, orderByChild, limitToLast } from 'firebase/database';
-import { User, LeaderboardEntry } from '../types/types';
+import { User, LeaderboardEntry, UserAchievement } from '../types/types';
 
 const STORAGE_KEYS = {
   USER: 'math_game_user'
@@ -76,6 +76,35 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
     return entries;
   } catch (error) {
     console.error('Error getting leaderboard entries:', error);
+    return [];
+  }
+};
+
+export const saveUserAchievement = async (userId: string, achievement: UserAchievement): Promise<void> => {
+  try {
+    const userAchievementsRef = ref(db, `users/${userId}/achievements`);
+    await push(userAchievementsRef, achievement);
+  } catch (error) {
+    console.error('Error saving achievement:', error);
+    throw error;
+  }
+};
+
+export const getUserAchievements = async (userId: string): Promise<UserAchievement[]> => {
+  try {
+    const userAchievementsRef = ref(db, `users/${userId}/achievements`);
+    const snapshot = await get(userAchievementsRef);
+    
+    if (!snapshot.exists()) return [];
+
+    const achievements: UserAchievement[] = [];
+    snapshot.forEach((childSnapshot) => {
+      achievements.push(childSnapshot.val());
+    });
+
+    return achievements;
+  } catch (error) {
+    console.error('Error getting achievements:', error);
     return [];
   }
 }; 

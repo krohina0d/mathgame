@@ -1,26 +1,24 @@
-import { Container, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import { theme } from './theme';
 import NumberGame from './components/NumberGame';
+import { SnackbarProvider } from 'notistack';
 
-const theme = createTheme({
-    palette: {
-        primary: {
-            main: '#2196f3',
-        },
-        secondary: {
-            main: '#f50057',
-        },
-    },
-});
-
-const App = () => {
+function App() {
     return (
         <ThemeProvider theme={theme}>
             <CssBaseline />
-            <Container>
+            <SnackbarProvider 
+                maxSnack={3} 
+                anchorOrigin={{ 
+                    vertical: 'bottom', 
+                    horizontal: 'center' 
+                }}
+            >
                 <NumberGame />
-            </Container>
+            </SnackbarProvider>
         </ThemeProvider>
     );
-};
+}
 
 export default App;
