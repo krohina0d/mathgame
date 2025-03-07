@@ -16,6 +16,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import AchievementDialog from './AchievementDialog';
 import { useSnackbar } from 'notistack';
 import Confetti from 'react-confetti';
+import LightbulbIcon from '@mui/icons-material/Lightbulb';
 
 const StyledCell = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(2),
@@ -130,6 +131,7 @@ const NumberGame = () => {
   const [showAchievements, setShowAchievements] = useState(false);
   const [userAchievements, setUserAchievements] = useState<UserAchievement[]>([]);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [hintPair, setHintPair] = useState<Pair | null>(null);
   const { enqueueSnackbar } = useSnackbar();
 
   // Добавляем ref для инструкции
@@ -648,6 +650,41 @@ const NumberGame = () => {
       });
   };
 
+  const handleHintClick = useCallback(() => {
+    if (!gameState.user) {
+      setShowAuthDialog(true);
+      return;
+    }
+
+    // Находим первую неоткрытую пару
+    const availablePair = gameState.foundPairs.find(pair => !pair.found);
+    
+    if (availablePair) {
+      if (gameState.isTimeMode) {
+        // В режиме с таймером просто отнимаем 15 очков
+        setGameState(prev => ({
+          ...prev,
+          score: prev.score - 15
+        }));
+      } else {
+        // В режиме без таймера обнуляем очки
+        setGameState(prev => ({
+          ...prev,
+          score: 0
+        }));
+      }
+
+      // Показываем подсказку
+      setHintPair(availablePair);
+      setTimeout(() => setHintPair(null), 2000);
+    } else {
+      enqueueSnackbar('Все пары уже найдены!', { 
+        variant: 'info',
+        autoHideDuration: 3000
+      });
+    }
+  }, [gameState.foundPairs, gameState.isTimeMode, gameState.user, enqueueSnackbar]);
+
   if (board.length === 0) {
     return null;
   }
@@ -656,6 +693,11 @@ const NumberGame = () => {
   const renderCell = (cell: Cell) => {
     const isSelected = gameState.selectedCells.some(
       selectedCell => selectedCell.row === cell.row && selectedCell.col === cell.col
+    );
+
+    const isHinted = hintPair && (
+      (hintPair.cell1.row === cell.row && hintPair.cell1.col === cell.col) ||
+      (hintPair.cell2.row === cell.row && hintPair.cell2.col === cell.col)
     );
 
     return (
@@ -674,7 +716,13 @@ const NumberGame = () => {
           position: 'relative',
           transition: 'all 0.3s ease',
           margin: '2px',
-          bgcolor: isSelected ? 'primary.light' : 'background.paper',
+          bgcolor: isHinted ? 'warning.light' : isSelected ? 'primary.light' : 'background.paper',
+          animation: isHinted ? 'pulse 1s infinite' : 'none',
+          '@keyframes pulse': {
+            '0%': { transform: 'scale(1)' },
+            '50%': { transform: 'scale(1.1)' },
+            '100%': { transform: 'scale(1)' }
+          },
           '&:hover': {
             bgcolor: isSelected ? 'primary.light' : 'grey.100'
           }
@@ -766,29 +814,83 @@ const NumberGame = () => {
           <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
             Уровень:
           </Typography>
-          <ButtonGroup 
-            variant="contained" 
-            color="primary"
-            size="medium"
-            sx={{ boxShadow: 3 }}
-          >
-            {Object.keys(LEVELS).map((level) => (
-              <Button
-                key={level}
-                onClick={() => handleLevelChange(Number(level))}
-                sx={{
-                  minWidth: { xs: '45px', sm: '60px' },
-                  bgcolor: gameState.level === Number(level) ? 'primary.dark' : 'primary.main',
-                  '&:hover': {
-                    bgcolor: gameState.level === Number(level) ? 'primary.dark' : 'primary.light',
-                  }
-                }}
-              >
-                {level}
-              </Button>
-            ))}
-          </ButtonGroup>
+          <Box sx={{ 
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 2,
+            mb: 2 
+          }}>
+            <ButtonGroup variant="contained" sx={{ borderRadius: 2 }}>
+              {Object.keys(LEVELS).map((level) => (
+                <Button
+                  key={level}
+                  onClick={() => handleLevelChange(Number(level))}
+                  variant={gameState.level === Number(level) ? 'contained' : 'outlined'}
+                  sx={{
+                    bgcolor: gameState.level === Number(level) ? 'primary.main' : 'transparent',
+                    borderColor: 'primary.main',
+                    color: gameState.level === Number(level) ? 'white' : 'primary.main'
+                  }}
+                >
+                  Уровень {level}
+                </Button>
+              ))}
+            </ButtonGroup>
+          </Box>
         </Box>
+      </Box>
+
+      <Box sx={{ 
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 2,
+        mb: 2
+      }}>
+        <Button
+          variant={gameState.isTimeMode ? 'contained' : 'outlined'}
+          onClick={toggleTimeMode}
+          color="primary"
+          sx={{ borderRadius: 2 }}
+        >
+          {gameState.isTimeMode ? 'Выключить таймер' : 'Включить таймер'}
+        </Button>
+
+        {gameState.isTimeMode && (
+          <Paper sx={{ 
+            px: 3,
+            py: 1,
+            borderRadius: 2,
+            bgcolor: gameState.timeLeft < 30 ? 'error.main' : 
+                     gameState.timeLeft < 60 ? 'warning.main' : 'success.main',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            animation: gameState.timeLeft < 30 ? 'blink 1s infinite' : 'none',
+            '@keyframes blink': {
+              '0%': { opacity: 1 },
+              '50%': { opacity: 0.7 },
+              '100%': { opacity: 1 }
+            }
+          }}>
+            ⏱️ {Math.floor(gameState.timeLeft / 60)}:{(gameState.timeLeft % 60).toString().padStart(2, '0')}
+          </Paper>
+        )}
+
+        <Button
+          variant="contained"
+          color="warning"
+          onClick={handleHintClick}
+          startIcon={<LightbulbIcon />}
+          sx={{ 
+            borderRadius: 2,
+            minWidth: 'auto'
+          }}
+        >
+          Подсказка {gameState.isTimeMode ? '(-15)' : '(сброс)'}
+        </Button>
       </Box>
 
       <Box sx={{ 
@@ -871,25 +973,6 @@ const NumberGame = () => {
                 mb: 2,
                 gap: 2
               }}>
-                <Button
-                  variant="contained"
-                  color={gameState.isTimeMode ? "error" : "success"}
-                  size="large"
-                  onClick={toggleTimeMode}
-                  sx={{ 
-                    minWidth: '200px',
-                    boxShadow: 3,
-                    animation: gameState.isTimeMode ? 'pulse 2s infinite' : 'none',
-                    '@keyframes pulse': {
-                      '0%': { transform: 'scale(1)' },
-                      '50%': { transform: 'scale(1.05)' },
-                      '100%': { transform: 'scale(1)' }
-                    }
-                  }}
-                >
-                  {gameState.isTimeMode ? "Выключить таймер" : "Включить таймер"}
-                </Button>
-
                 {gameState.isTimeMode && (
                   <Paper sx={{ 
                     p: 2,
