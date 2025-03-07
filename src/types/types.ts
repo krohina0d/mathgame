@@ -107,7 +107,50 @@ export const ACHIEVEMENTS: Achievement[] = [
     requiredStreak: 100,
     level: 1,
     icon: '👑'
-  }
+  },
+  // Добавляем достижения для остальных уровней
+  ...[2, 3, 4, 5].flatMap(level => [
+    {
+      id: `score_5_level_${level}`,
+      title: 'Первые шаги',
+      description: '5 пар подряд',
+      requiredStreak: 5,
+      level,
+      icon: '🌟'
+    },
+    {
+      id: `score_10_level_${level}`,
+      title: 'Начинающий математик',
+      description: '10 пар подряд',
+      requiredStreak: 10,
+      level,
+      icon: '🎯'
+    },
+    {
+      id: `score_25_level_${level}`,
+      title: 'Опытный счетовод',
+      description: '25 пар подряд',
+      requiredStreak: 25,
+      level,
+      icon: '🎯🎯'
+    },
+    {
+      id: `score_50_level_${level}`,
+      title: 'Мастер чисел',
+      description: '50 пар подряд',
+      requiredStreak: 50,
+      level,
+      icon: '🏆'
+    },
+    {
+      id: `score_100_level_${level}`,
+      title: 'Легенда математики',
+      description: '100 пар подряд',
+      requiredStreak: 100,
+      level,
+      icon: '👑'
+    }
+  ])
 ];
 
 export interface LeaderboardEntry {
