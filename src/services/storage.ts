@@ -65,15 +65,33 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
       });
     }
     
-    entries.sort((a, b) => {
+    // Группируем записи по уровню и userId, оставляя только лучший результат
+    const bestResults = entries.reduce((acc: LeaderboardEntry[], entry) => {
+      const existingEntry = acc.find(
+        e => e.level === entry.level && e.userId === entry.userId
+      );
+      
+      if (!existingEntry) {
+        acc.push(entry);
+      } else if (entry.score > existingEntry.score) {
+        // Заменяем существующую запись, если новый результат лучше
+        const index = acc.indexOf(existingEntry);
+        acc[index] = entry;
+      }
+      
+      return acc;
+    }, []);
+    
+    // Сортируем сначала по уровню, затем по очкам
+    bestResults.sort((a, b) => {
       if (a.level !== b.level) {
         return a.level - b.level;
       }
       return b.score - a.score;
     });
     
-    console.log('Fetched entries:', entries);
-    return entries;
+    console.log('Fetched entries:', bestResults);
+    return bestResults;
   } catch (error) {
     console.error('Error getting leaderboard entries:', error);
     return [];
