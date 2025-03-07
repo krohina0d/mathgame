@@ -1,5 +1,5 @@
 import { db } from '../config/firebase';
-import { ref, push, get, query, orderByChild, limitToLast } from 'firebase/database';
+import { ref, push, get, query } from 'firebase/database';
 import { User, LeaderboardEntry, UserAchievement } from '../types/types';
 
 const STORAGE_KEYS = {
@@ -45,11 +45,7 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
     console.log('Fetching leaderboard entries...');
     
     const leaderboardRef = ref(db, 'leaderboard');
-    const leaderboardQuery = query(
-      leaderboardRef,
-      orderByChild('score'),
-      limitToLast(100)
-    );
+    const leaderboardQuery = query(leaderboardRef);
     
     const snapshot = await get(leaderboardQuery);
     const entries: LeaderboardEntry[] = [];
@@ -68,9 +64,13 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
         });
       });
     }
-
-    // Сортируем по убыванию счета
-    entries.sort((a, b) => b.score - a.score);
+    
+    entries.sort((a, b) => {
+      if (a.level !== b.level) {
+        return a.level - b.level;
+      }
+      return b.score - a.score;
+    });
     
     console.log('Fetched entries:', entries);
     return entries;

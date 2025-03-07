@@ -15,6 +15,7 @@ import ProfileDialog from './ProfileDialog';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import AchievementDialog from './AchievementDialog';
 import { useSnackbar } from 'notistack';
+import Confetti from 'react-confetti';
 
 const StyledCell = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(2),
@@ -104,51 +105,6 @@ const InlineLeaderboard = ({ entries, currentLevel }: { entries: LeaderboardEntr
   );
 };
 
-// Добавим компонент для отображения текущей серии
-const StreakCounter = ({ streak }: { streak: number }) => (
-  <Paper
-    sx={{
-      position: 'fixed',
-      right: { xs: 16, lg: 332 }, // 332px = 300px (ширина лидерборда) + 32px (отступ)
-      top: '50%',
-      transform: 'translateY(-50%)',
-      p: 2,
-      borderRadius: 2,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: 1,
-      bgcolor: streak > 0 ? 'success.light' : 'background.paper',
-      transition: 'all 0.3s ease',
-      boxShadow: 3,
-      zIndex: 10
-    }}
-  >
-    <Typography variant="h6" sx={{ color: streak > 0 ? 'white' : 'text.primary' }}>
-      Серия
-    </Typography>
-    <Typography 
-      variant="h4" 
-      sx={{ 
-        fontWeight: 'bold',
-        color: streak > 0 ? 'white' : 'text.primary',
-        textShadow: streak > 0 ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
-      }}
-    >
-      {streak}
-    </Typography>
-    <Typography 
-      variant="body2" 
-      sx={{ 
-        color: streak > 0 ? 'white' : 'text.secondary',
-        textAlign: 'center'
-      }}
-    >
-      {streak > 0 ? '🔥 Так держать!' : 'Найди пару чисел'}
-    </Typography>
-  </Paper>
-);
-
 const NumberGame = () => {
   const [attempt, setAttempt] = useState(0);
   const [board, setBoard] = useState<Cell[][]>([]);
@@ -171,15 +127,13 @@ const NumberGame = () => {
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
-  const [currentStreak, setCurrentStreak] = useState(0);
   const [showAchievements, setShowAchievements] = useState(false);
   const [userAchievements, setUserAchievements] = useState<UserAchievement[]>([]);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const { enqueueSnackbar } = useSnackbar();
 
   // Добавляем ref для инструкции
   const instructionsRef = useRef<HTMLDivElement>(null);
-
-  // Добавляем хук useSnackbar
-  const { enqueueSnackbar } = useSnackbar();
 
   const currentLevelConfig = LEVELS[gameState.level];
 
@@ -390,8 +344,66 @@ const NumberGame = () => {
     return (rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1);
   };
 
+  const checkAchievements = useCallback(async () => {
+    if (!gameState.user || gameState.isTimeMode) return;
+
+    const unlockedAchievements = ACHIEVEMENTS
+      .filter(achievement => 
+        achievement.level === gameState.level &&
+        achievement.requiredStreak <= gameState.score &&
+        !userAchievements.some(ua => 
+          ua.achievementId === achievement.id && 
+          ua.level === gameState.level
+        )
+      );
+
+    for (const achievement of unlockedAchievements) {
+      const newAchievement: UserAchievement = {
+        achievementId: achievement.id,
+        unlockedAt: Date.now(),
+        level: gameState.level
+      };
+      
+      await saveUserAchievement(gameState.user.id, newAchievement);
+      setUserAchievements(prev => [...prev, newAchievement]);
+      
+      // Показываем конфетти
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 5000);
+
+      // Показываем уведомление
+      enqueueSnackbar(
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 2,
+          animation: 'fadeIn 0.5s ease-in-out'
+        }}>
+          <Box sx={{ fontSize: '2rem' }}>{achievement.icon}</Box>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+              {achievement.title}
+            </Typography>
+            <Typography variant="body2">
+              {achievement.description}
+            </Typography>
+          </Box>
+        </Box>,
+        { 
+          variant: 'success',
+          autoHideDuration: 5000,
+          style: {
+            backgroundColor: '#2e7d32',
+            borderRadius: '12px',
+            padding: '16px'
+          }
+        }
+      );
+    }
+  }, [gameState.level, gameState.score, gameState.user, gameState.isTimeMode, userAchievements, enqueueSnackbar]);
+
   const handleCellClick = useCallback((cell: Cell) => {
-    if (gameState.isTimeMode && gameState.timeLeft === 0) return;
+    if (showAllPairs) return;
 
     setGameState(prevState => {
       const selectedCells = [...prevState.selectedCells];
@@ -435,14 +447,22 @@ const NumberGame = () => {
               }, 1000);
             }
 
-            return {
+            const newScore = prevState.isTimeMode ? prevState.score + CORRECT_POINTS : prevState.score + 1;
+            
+            const result = {
               ...prevState,
               foundPairs: newFoundPairs,
               selectedCells: [],
-              score: prevState.score + (prevState.isTimeMode ? CORRECT_POINTS : 1),
+              score: newScore,
               lastAttemptSuccess: true,
               totalFoundPairs: prevState.totalFoundPairs + 1
             };
+
+            if (!prevState.isTimeMode) {
+              checkAchievements();
+            }
+
+            return result;
           }
         }
         setAttempt(prev => prev + 1);
@@ -450,20 +470,13 @@ const NumberGame = () => {
           ...prevState, 
           selectedCells: [],
           lastAttemptSuccess: false,
-          score: prevState.isTimeMode ? prevState.score + MISTAKE_PENALTY : prevState.score
+          score: prevState.isTimeMode ? prevState.score + MISTAKE_PENALTY : 0
         };
       }
 
       return { ...prevState, selectedCells: [] };
     });
-
-    if (gameState.lastAttemptSuccess) {
-      setCurrentStreak(prev => prev + 1);
-      checkAchievements();
-    } else {
-      setCurrentStreak(0);
-    }
-  }, [initializeGame, gameState.isTimeMode, gameState.timeLeft]);
+  }, [initializeGame, gameState.isTimeMode, gameState.timeLeft, checkAchievements]);
 
   const handleContinue = useCallback(() => {
     setShowAllPairs(false);
@@ -594,142 +607,62 @@ const NumberGame = () => {
     });
   };
 
-  const checkAchievements = useCallback(async () => {
-    if (!gameState.user || gameState.isTimeMode) return;
+  // Добавляем функцию для отрисовки линий
+  const renderLines = () => {
+    return gameState.foundPairs
+      .filter(pair => pair.found)
+      .map((pair, index) => {
+        const cell1Elem = document.querySelector(
+          `[data-position="${pair.cell1.row}-${pair.cell1.col}"]`
+        );
+        const cell2Elem = document.querySelector(
+          `[data-position="${pair.cell2.row}-${pair.cell2.col}"]`
+        );
 
-    const unlockedAchievements = ACHIEVEMENTS
-      .filter(achievement => 
-        achievement.level === gameState.level &&
-        achievement.requiredStreak <= currentStreak &&
-        !userAchievements.some(ua => 
-          ua.achievementId === achievement.id && 
-          ua.level === gameState.level
-        )
-      );
+        if (!cell1Elem || !cell2Elem) return null;
 
-    for (const achievement of unlockedAchievements) {
-      const newAchievement: UserAchievement = {
-        achievementId: achievement.id,
-        unlockedAt: Date.now(),
-        level: gameState.level
-      };
-      
-      await saveUserAchievement(gameState.user.id, newAchievement);
-      setUserAchievements(prev => [...prev, newAchievement]);
-      
-      // Используем enqueueSnackbar из хука
-      enqueueSnackbar(
-        `🎉 Получено достижение: ${achievement.title}!`,
-        { 
-          variant: 'success',
-          autoHideDuration: 5000
-        }
-      );
-    }
-  }, [currentStreak, gameState.level, gameState.user, gameState.isTimeMode, userAchievements, enqueueSnackbar]);
+        const rect1 = cell1Elem.getBoundingClientRect();
+        const rect2 = cell2Elem.getBoundingClientRect();
+        const boardElem = document.querySelector('.game-board');
+        const boardRect = boardElem?.getBoundingClientRect();
+
+        if (!boardRect) return null;
+
+        const x1 = rect1.left + rect1.width / 2 - boardRect.left;
+        const y1 = rect1.top + rect1.height / 2 - boardRect.top;
+        const x2 = rect2.left + rect2.width / 2 - boardRect.left;
+        const y2 = rect2.top + rect2.height / 2 - boardRect.top;
+
+        return (
+          <line
+            key={`line-${index}`}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke={pair.type === 'sum' ? '#4caf50' : '#2196f3'}
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+        );
+      });
+  };
 
   if (board.length === 0) {
     return null;
   }
 
+  // Обновляем renderCell, добавляя data-position
   const renderCell = (cell: Cell) => {
-    let borderStyle = {};
-    let backgroundColor = 'background.paper';
-
-    // Проверяем, является ли клетка первой выбранной
-    const isFirstSelected = gameState.selectedCells.length === 1 && 
-      gameState.selectedCells[0].row === cell.row && 
-      gameState.selectedCells[0].col === cell.col;
-
-    if (isFirstSelected) {
-      backgroundColor = 'primary.light';
-    }
-
-    // Проверяем все найденные пары
-    const foundPair = gameState.foundPairs.find(
-      pair => pair.found && 
-      ((pair.cell1.row === cell.row && pair.cell1.col === cell.col) ||
-       (pair.cell2.row === cell.row && pair.cell2.col === cell.col))
+    const isSelected = gameState.selectedCells.some(
+      selectedCell => selectedCell.row === cell.row && selectedCell.col === cell.col
     );
-
-    if (foundPair) {
-      const isFirstCell = foundPair.cell1.row === cell.row && foundPair.cell1.col === cell.col;
-      const isHorizontalPair = foundPair.cell1.row === foundPair.cell2.row;
-      
-      // Генерируем цвет для пары
-      const pairIndex = gameState.foundPairs.indexOf(foundPair);
-      const hue = (pairIndex * 137.508) % 360;
-      const color = `hsl(${hue}, 70%, 50%)`;
-
-      // Определяем стиль рамки
-      if (isHorizontalPair) {
-        if (isFirstCell) {
-          borderStyle = {
-            borderLeft: '4px solid ' + color,
-            borderTop: '4px solid ' + color,
-            borderBottom: '4px solid ' + color,
-            marginRight: '-2px',
-            zIndex: pairIndex + 1,
-          };
-        } else {
-          borderStyle = {
-            borderRight: '4px solid ' + color,
-            borderTop: '4px solid ' + color,
-            borderBottom: '4px solid ' + color,
-            marginLeft: '-2px',
-            zIndex: pairIndex + 1,
-          };
-        }
-      } else {
-        if (isFirstCell) {
-          borderStyle = {
-            borderLeft: '4px solid ' + color,
-            borderRight: '4px solid ' + color,
-            borderTop: '4px solid ' + color,
-            marginBottom: '-2px',
-            zIndex: pairIndex + 1,
-          };
-        } else {
-          borderStyle = {
-            borderLeft: '4px solid ' + color,
-            borderRight: '4px solid ' + color,
-            borderBottom: '4px solid ' + color,
-            marginTop: '-2px',
-            zIndex: pairIndex + 1,
-          };
-        }
-      }
-
-      // Добавляем маркер операции
-      const operationMark = foundPair.type === 'sum' ? '+' : '−';
-      borderStyle = {
-        ...borderStyle,
-        '&::after': {
-          content: `"${operationMark}"`,
-          position: 'absolute',
-          top: isFirstCell ? '-12px' : 'auto',
-          bottom: !isFirstCell ? '-12px' : 'auto',
-          right: isHorizontalPair ? '50%' : '-12px',
-          backgroundColor: color,
-          color: 'white',
-          width: '20px',
-          height: '20px',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          transform: isHorizontalPair ? 'translateX(50%)' : 'none',
-          zIndex: pairIndex + 2,
-        }
-      };
-    }
 
     return (
       <StyledCell
         key={`${cell.row}-${cell.col}`}
         onClick={() => handleCellClick(cell)}
+        data-position={`${cell.row}-${cell.col}`}
         elevation={1}
         sx={{
           width: { xs: '48px', sm: '64px' },
@@ -741,12 +674,9 @@ const NumberGame = () => {
           position: 'relative',
           transition: 'all 0.3s ease',
           margin: '2px',
-          ...borderStyle,
-          bgcolor: backgroundColor,
+          bgcolor: isSelected ? 'primary.light' : 'background.paper',
           '&:hover': {
-            bgcolor: isFirstSelected 
-              ? 'primary.light' 
-              : (Object.keys(borderStyle).length === 0 ? 'grey.100' : 'background.paper')
+            bgcolor: isSelected ? 'primary.light' : 'grey.100'
           }
         }}
       >
@@ -1003,8 +933,22 @@ const NumberGame = () => {
                 gridTemplateColumns: `repeat(${currentLevelConfig.size}, 1fr)`,
                 gap: { xs: 1, sm: 2 },
                 width: 'fit-content',
-                margin: '0 auto'
-              }}>
+                margin: '0 auto',
+                position: 'relative'
+              }} className="game-board">
+                <svg
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                    zIndex: 1
+                  }}
+                >
+                  {renderLines()}
+                </svg>
                 {board.map((row, rowIndex) =>
                   row.map((cell, colIndex) => renderCell(cell))
                 )}
@@ -1104,11 +1048,6 @@ const NumberGame = () => {
           />
         </Box>
       </Box>
-
-      {/* Добавляем счетчик серии */}
-      {!gameState.isTimeMode && (
-        <StreakCounter streak={currentStreak} />
-      )}
 
       <AuthDialog 
         open={showAuthDialog}
@@ -1276,8 +1215,17 @@ const NumberGame = () => {
         achievements={ACHIEVEMENTS}
         userAchievements={userAchievements}
         currentLevel={gameState.level}
-        currentStreak={currentStreak}
       />
+
+      {showConfetti && (
+        <Confetti
+          width={window.innerWidth}
+          height={window.innerHeight}
+          recycle={false}
+          numberOfPieces={200}
+          gravity={0.3}
+        />
+      )}
     </Box>
   );
 };

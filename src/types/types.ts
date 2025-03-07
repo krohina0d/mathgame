@@ -69,33 +69,41 @@ export interface User {
 
 export const ACHIEVEMENTS: Achievement[] = [
   {
-    id: 'streak_10',
+    id: 'score_5',
+    title: 'Первые шаги',
+    description: '5 пар подряд',
+    requiredStreak: 5,
+    level: 1,
+    icon: '🌟'
+  },
+  {
+    id: 'score_10',
     title: 'Начинающий математик',
-    description: '10 правильных ответов подряд',
+    description: '10 пар подряд',
     requiredStreak: 10,
     level: 1,
     icon: '🎯'
   },
   {
-    id: 'streak_20',
+    id: 'score_25',
     title: 'Опытный счетовод',
-    description: '20 правильных ответов подряд',
-    requiredStreak: 20,
+    description: '25 пар подряд',
+    requiredStreak: 25,
     level: 1,
     icon: '🎯🎯'
   },
   {
-    id: 'streak_50',
+    id: 'score_50',
     title: 'Мастер чисел',
-    description: '50 правильных ответов подряд',
+    description: '50 пар подряд',
     requiredStreak: 50,
     level: 1,
     icon: '🏆'
   },
   {
-    id: 'streak_100',
+    id: 'score_100',
     title: 'Легенда математики',
-    description: '100 правильных ответов подряд',
+    description: '100 пар подряд',
     requiredStreak: 100,
     level: 1,
     icon: '👑'
