@@ -1,74 +1,77 @@
 import { useState } from 'react';
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
+  Box,
   Button,
   TextField,
-  Box,
   Typography,
+  Paper,
+  Container,
   Alert,
-  Divider,
-  CircularProgress
+  Tabs,
+  Tab,
+  CircularProgress,
 } from '@mui/material';
-import { User } from '../types/types';
-import { auth, googleProvider } from '../config/firebase';
-import { 
-  signInWithPopup, 
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail
-} from 'firebase/auth';
 import GoogleIcon from '@mui/icons-material/Google';
+import { useAuth } from '../context/AuthContext';
 
-interface AuthDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onAuth: (user: User) => void;
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
 }
 
-const AuthDialog = ({ open, onClose, onAuth }: AuthDialogProps) => {
+const TabPanel = ({ children, value, index, ...other }: TabPanelProps) => {
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`auth-tabpanel-${index}`}
+      aria-labelledby={`auth-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+};
+
+const AuthDialog = () => {
+  const [tabValue, setTabValue] = useState(0);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isVerificationSent, setIsVerificationSent] = useState(false);
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleGoogleSignIn = async () => {
-    try {
-      setIsLoading(true);
-      const result = await signInWithPopup(auth, googleProvider);
-      const user: User = {
-        id: result.user.uid,
-        email: result.user.email || '',
-        firstName: result.user.displayName?.split(' ')[0] || '',
-        lastName: result.user.displayName?.split(' ')[1] || '',
-        displayName: result.user.displayName || ''
-      };
-      onAuth(user);
-      onClose();
-    } catch (error) {
-      console.error('Error signing in with Google:', error);
-      setError('Ошибка при входе через Google. Пожалуйста, попробуйте снова.');
-    } finally {
-      setIsLoading(false);
-    }
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+
+  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
+    setError(null);
   };
 
-  const handleEmailRegistration = async () => {
-    if (!email || !password || !confirmPassword || !firstName || !lastName) {
-      setError('Пожалуйста, заполните все поля');
+  const handleEmailSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setError('Заполните все поля');
       return;
     }
 
-    if (!email.includes('@')) {
-      setError('Введите корректный email');
+    setLoading(true);
+    setError(null);
+
+    try {
+      await signInWithEmail(email, password);
+    } catch (error: any) {
+      setError(error.message || 'Ошибка входа');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEmailSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password || !displayName) {
+      setError('Заполните все поля');
       return;
     }
 
@@ -77,224 +80,150 @@ const AuthDialog = ({ open, onClose, onAuth }: AuthDialogProps) => {
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError('Пароли не совпадают');
-      return;
-    }
+    setLoading(true);
+    setError(null);
 
     try {
-      setIsLoading(true);
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      await sendEmailVerification(userCredential.user);
-      setIsVerificationSent(true);
-
-      const user: User = {
-        id: userCredential.user.uid,
-        email,
-        firstName,
-        lastName,
-        displayName: `${firstName} ${lastName}`
-      };
-
-      onAuth(user);
+      await signUpWithEmail(email, password, displayName);
     } catch (error: any) {
-      console.error('Error registering:', error);
-      if (error.code === 'auth/email-already-in-use') {
-        setError('Этот email уже зарегистрирован. Попробуйте войти.');
-      } else {
-        setError('Ошибка при регистрации. Пожалуйста, попробуйте снова.');
-      }
+      setError(error.message || 'Ошибка регистрации');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleEmailSignIn = async () => {
-    if (!email || !password) {
-      setError('Пожалуйста, введите email и пароль');
-      return;
-    }
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError(null);
 
     try {
-      setIsLoading(true);
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      
-      if (!userCredential.user.emailVerified) {
-        setError('Пожалуйста, подтвердите ваш email перед входом');
-        await sendEmailVerification(userCredential.user);
-        setIsVerificationSent(true);
-        return;
-      }
-
-      const user: User = {
-        id: userCredential.user.uid,
-        email: userCredential.user.email || '',
-        firstName: firstName || userCredential.user.displayName?.split(' ')[0] || '',
-        lastName: lastName || userCredential.user.displayName?.split(' ')[1] || '',
-        displayName: userCredential.user.displayName || `${firstName} ${lastName}`
-      };
-
-      onAuth(user);
-      onClose();
-    } catch (error) {
-      console.error('Error signing in:', error);
-      setError('Неверный email или пароль');
+      await signInWithGoogle();
+    } catch (error: any) {
+      setError(error.message || 'Ошибка входа через Google');
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!email) {
-      setError('Пожалуйста, введите email');
-      return;
-    }
-
-    try {
-      await sendPasswordResetEmail(auth, email);
-      setError('Инструкции по сбросу пароля отправлены на ваш email');
-    } catch (error) {
-      console.error('Error sending reset password:', error);
-      setError('Ошибка при отправке инструкций. Проверьте email.');
+      setLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ textAlign: 'center' }}>
-        {isRegistering ? 'Регистрация' : 'Вход'} для таблицы рейтинга 🏆
-      </DialogTitle>
-      <DialogContent>
-        <Box sx={{ mt: 2 }}>
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
-          
-          {isVerificationSent && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              На ваш email отправлено письмо для подтверждения. Пожалуйста, проверьте почту.
-            </Alert>
-          )}
+    <Container maxWidth="sm" sx={{ mt: 8 }}>
+      <Paper elevation={3} sx={{ p: 2 }}>
+        <Typography variant="h4" component="h1" gutterBottom align="center">
+          Чат с ИИ
+        </Typography>
+        <Typography variant="body1" color="text.secondary" align="center" gutterBottom>
+          Войдите в систему, чтобы начать общение с ИИ
+        </Typography>
 
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={handleGoogleSignIn}
-            disabled={isLoading}
-            startIcon={<GoogleIcon />}
-            sx={{ 
-              mb: 3,
-              py: 1.5,
-              bgcolor: '#4285f4',
-              '&:hover': {
-                bgcolor: '#3367d6'
-              }
-            }}
-          >
-            Войти через Google
-          </Button>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
 
-          <Divider sx={{ mb: 3 }}>
-            <Typography color="textSecondary">или</Typography>
-          </Divider>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={tabValue} onChange={handleTabChange} centered>
+            <Tab label="Вход" />
+            <Tab label="Регистрация" />
+          </Tabs>
+        </Box>
 
-          <TextField
-            fullWidth
-            label="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            margin="normal"
-            type="email"
-          />
-
-          {isRegistering ? (
-            <>
-              <TextField
-                fullWidth
-                label="Пароль"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                margin="normal"
-                type="password"
-                helperText="Минимум 6 символов"
-              />
-              <TextField
-                fullWidth
-                label="Подтвердите пароль"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                margin="normal"
-                type="password"
-                error={password !== confirmPassword && confirmPassword !== ''}
-                helperText={
-                  password !== confirmPassword && confirmPassword !== '' 
-                    ? 'Пароли не совпадают' 
-                    : ' '
-                }
-              />
-              <TextField
-                fullWidth
-                label="Имя"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                margin="normal"
-              />
-              <TextField
-                fullWidth
-                label="Фамилия"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                margin="normal"
-              />
-            </>
-          ) : (
+        <TabPanel value={tabValue} index={0}>
+          <Box component="form" onSubmit={handleEmailSignIn}>
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              margin="normal"
+              required
+              disabled={loading}
+            />
             <TextField
               fullWidth
               label="Пароль"
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               margin="normal"
-              type="password"
+              required
+              disabled={loading}
             />
-          )}
-
-          {!isRegistering && (
             <Button
-              onClick={handleForgotPassword}
-              sx={{ mt: 1 }}
-              color="primary"
+              type="submit"
+              fullWidth
+              variant="contained"
+              sx={{ mt: 2, mb: 2 }}
+              disabled={loading}
             >
-              Забыли пароль?
+              {loading ? <CircularProgress size={24} /> : 'Войти'}
             </Button>
-          )}
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={1}>
+          <Box component="form" onSubmit={handleEmailSignUp}>
+            <TextField
+              fullWidth
+              label="Имя"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              margin="normal"
+              required
+              disabled={loading}
+            />
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              margin="normal"
+              required
+              disabled={loading}
+            />
+            <TextField
+              fullWidth
+              label="Пароль"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              margin="normal"
+              required
+              disabled={loading}
+              helperText="Минимум 6 символов"
+            />
+            <Button
+              type="submit"
+              fullWidth
+              variant="contained"
+              sx={{ mt: 2, mb: 2 }}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Зарегистрироваться'}
+            </Button>
+          </Box>
+        </TabPanel>
+
+        <Box sx={{ textAlign: 'center', mt: 2 }}>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            или
+          </Typography>
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<GoogleIcon />}
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+            sx={{ mt: 1 }}
+          >
+            Войти через Google
+          </Button>
         </Box>
-      </DialogContent>
-      <DialogActions sx={{ p: 3, flexDirection: 'column', gap: 1 }}>
-        <Button 
-          fullWidth
-          onClick={isRegistering ? handleEmailRegistration : handleEmailSignIn}
-          variant="contained" 
-          color="primary"
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <CircularProgress size={24} color="inherit" />
-          ) : (
-            isRegistering ? 'Зарегистрироваться' : 'Войти'
-          )}
-        </Button>
-        <Button
-          fullWidth
-          onClick={() => setIsRegistering(!isRegistering)}
-          color="inherit"
-        >
-          {isRegistering ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+      </Paper>
+    </Container>
   );
 };
 
-export default AuthDialog; 
+export default AuthDialog;

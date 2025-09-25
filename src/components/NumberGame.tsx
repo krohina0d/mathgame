@@ -17,6 +17,7 @@ import AchievementDialog from './AchievementDialog';
 import { useSnackbar } from 'notistack';
 import Confetti from 'react-confetti';
 import LightbulbIcon from '@mui/icons-material/Lightbulb';
+import House from './House';
 
 const StyledCell = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(2),
@@ -133,11 +134,17 @@ const NumberGame = () => {
   const [showConfetti, setShowConfetti] = useState(false);
   const [hintPair, setHintPair] = useState<Pair | null>(null);
   const { enqueueSnackbar } = useSnackbar();
+  const [floors, setFloors] = useState(0);
 
   // Добавляем ref для инструкции
   const instructionsRef = useRef<HTMLDivElement>(null);
 
   const currentLevelConfig = LEVELS[gameState.level];
+
+  // Добавляем функцию для проверки завершения матрицы
+  const checkMatrixCompletion = useCallback((foundPairs: any[]): boolean => {
+    return foundPairs.every(pair => pair.found);
+  }, []);
 
   const generateTargetNumber = useCallback((board: Cell[][]): number => {
     // Находим все возможные пары
@@ -405,8 +412,6 @@ const NumberGame = () => {
   }, [gameState.level, gameState.score, gameState.user, gameState.isTimeMode, userAchievements, enqueueSnackbar]);
 
   const handleCellClick = useCallback((cell: Cell) => {
-    if (showAllPairs) return;
-
     setGameState(prevState => {
       const selectedCells = [...prevState.selectedCells];
 
@@ -439,19 +444,21 @@ const NumberGame = () => {
 
           if (pairIndex !== -1) {
             const newFoundPairs = [...prevState.foundPairs];
-            newFoundPairs[pairIndex] = { ...newFoundPairs[pairIndex], found: true };
+            newFoundPairs[pairIndex].found = true;
 
-            const allFound = newFoundPairs.every(pair => pair.found);
-            
-            if (allFound) {
+            // Проверяем завершение матрицы
+            if (checkMatrixCompletion(newFoundPairs)) {
+              setFloors(prev => prev + 1);
               setTimeout(() => {
                 initializeGame();
               }, 1000);
             }
 
-            const newScore = prevState.isTimeMode ? prevState.score + CORRECT_POINTS : prevState.score + 1;
+            const newScore = prevState.isTimeMode ? 
+              prevState.score + CORRECT_POINTS : 
+              prevState.score + 1;
             
-            const result = {
+            return {
               ...prevState,
               foundPairs: newFoundPairs,
               selectedCells: [],
@@ -459,15 +466,8 @@ const NumberGame = () => {
               lastAttemptSuccess: true,
               totalFoundPairs: prevState.totalFoundPairs + 1
             };
-
-            if (!prevState.isTimeMode) {
-              checkAchievements();
-            }
-
-            return result;
           }
         }
-        setAttempt(prev => prev + 1);
         return { 
           ...prevState, 
           selectedCells: [],
@@ -478,7 +478,7 @@ const NumberGame = () => {
 
       return { ...prevState, selectedCells: [] };
     });
-  }, [initializeGame, gameState.isTimeMode, gameState.timeLeft, checkAchievements]);
+  }, [initializeGame, gameState.isTimeMode, gameState.timeLeft, checkMatrixCompletion]);
 
   const handleContinue = useCallback(() => {
     setShowAllPairs(false);
@@ -558,6 +558,7 @@ const NumberGame = () => {
       totalFoundPairs: 0,
       isTimeMode: false
     }));
+    setFloors(0); // Сбрасываем количество этажей
     initializeGame();
   };
 
@@ -1123,12 +1124,34 @@ const NumberGame = () => {
         <Box sx={{ 
           width: { xs: '100%', lg: '300px' },
           flexShrink: 0,
-          display: { xs: 'none', lg: 'block' }
+          display: { xs: 'none', lg: 'block' },
+          position: 'sticky',
+          top: '20px',
+          alignSelf: 'flex-start',
+          zIndex: 1
         }}>
-          <InlineLeaderboard 
-            entries={leaderboardEntries} 
-            currentLevel={gameState.level}
-          />
+          <Paper sx={{ 
+            p: 3, 
+            borderRadius: 2,
+            bgcolor: 'background.paper',
+            boxShadow: 3,
+            overflow: 'visible',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2
+          }}>
+            <Box>
+              <Typography variant="h6" align="center" gutterBottom>
+                Ваш дом 🏠
+              </Typography>
+              <Typography variant="body2" align="center" color="text.secondary">
+                Этажей построено: {floors}
+              </Typography>
+            </Box>
+            <Box sx={{ height: '400px', overflow: 'hidden' }}>
+              <House floors={floors} />
+            </Box>
+          </Paper>
         </Box>
       </Box>
 
@@ -1298,6 +1321,7 @@ const NumberGame = () => {
         achievements={ACHIEVEMENTS}
         userAchievements={userAchievements}
         currentLevel={gameState.level}
+        currentStreak={gameState.totalFoundPairs}
       />
 
       {showConfetti && (

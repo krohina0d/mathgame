@@ -1,8 +1,30 @@
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { theme } from './theme';
-import NumberGame from './components/NumberGame';
+import ChatApp from './components/ChatApp';
+import AuthDialog from './components/AuthDialog';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { SnackbarProvider } from 'notistack';
+import { CircularProgress, Box } from '@mui/material';
+
+const AppContent = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box 
+        display="flex" 
+        justifyContent="center" 
+        alignItems="center" 
+        minHeight="100vh"
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return user ? <ChatApp /> : <AuthDialog />;
+};
 
 function App() {
     return (
@@ -15,7 +37,9 @@ function App() {
                     horizontal: 'center' 
                 }}
             >
-                <NumberGame />
+                <AuthProvider>
+                    <AppContent />
+                </AuthProvider>
             </SnackbarProvider>
         </ThemeProvider>
     );

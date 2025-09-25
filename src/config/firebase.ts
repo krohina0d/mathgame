@@ -1,15 +1,15 @@
 import { initializeApp } from 'firebase/app';
-import { getDatabase } from 'firebase/database';
+import { getFirestore } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCJrJxZRudPh3l7CyfcXF7RLTE_H_xRRu0",
-  authDomain: "mathgame-530a3.firebaseapp.com",
-  databaseURL: "https://mathgame-530a3-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "mathgame-530a3",
-  storageBucket: "mathgame-530a3.appspot.com",
-  messagingSenderId: "786070135008",
-  appId: "1:786070135008:web:d8bc978adaab5b4ef9b085"
+  
+    apiKey: "AIzaSyCTJXzrliUGdUGQmvl4wtKVjiJgYyXqPGA",
+    authDomain: "math-chat-app-32b58.firebaseapp.com",
+    projectId: "math-chat-app-32b58",
+    storageBucket: "math-chat-app-32b58.firebasestorage.app",
+    messagingSenderId: "384055352603",
+    appId: "1:384055352603:web:aea21a19cc2d4612dd87be"
 };
 
 // Инициализируем Firebase
@@ -17,7 +17,7 @@ const app = initializeApp(firebaseConfig);
 
 // Получаем экземпляры сервисов
 export const auth = getAuth(app);
-export const db = getDatabase(app);
+export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // Настраиваем провайдер Google
@@ -25,4 +25,9 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-console.log('Firebase Realtime Database initialized successfully'); 
+console.log('Firebase Firestore initialized successfully');
+console.log('Firebase config:', {
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain,
+  apiKey: firebaseConfig.apiKey ? '***' + firebaseConfig.apiKey.slice(-4) : 'not set'
+}); 
