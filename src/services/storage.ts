@@ -1,6 +1,6 @@
 import { db } from '../config/firebase';
 import { ref, push, get, query } from 'firebase/database';
-import { User, LeaderboardEntry, UserAchievement } from '../types/types';
+import { User, LeaderboardEntry } from '../types/types';
 
 const STORAGE_KEYS = {
   USER: 'math_game_user'
@@ -28,7 +28,6 @@ export const saveLeaderboardEntry = async (entry: LeaderboardEntry): Promise<voi
       userId: entry.userId,
       displayName: entry.displayName,
       score: Number(entry.score),
-      level: Number(entry.level),
       foundPairs: Number(entry.foundPairs),
       timestamp: Date.now()
     });
@@ -58,17 +57,16 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
           userId: data.userId,
           displayName: data.displayName,
           score: Number(data.score),
-          level: Number(data.level),
           foundPairs: Number(data.foundPairs),
           timestamp: data.timestamp
         });
       });
     }
     
-    // Группируем записи по уровню и userId, оставляя только лучший результат
+    // Группируем записи по userId, оставляя только лучший результат
     const bestResults = entries.reduce((acc: LeaderboardEntry[], entry) => {
       const existingEntry = acc.find(
-        e => e.level === entry.level && e.userId === entry.userId
+        e => e.userId === entry.userId
       );
       
       if (!existingEntry) {
@@ -82,13 +80,8 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
       return acc;
     }, []);
     
-    // Сортируем сначала по уровню, затем по очкам
-    bestResults.sort((a, b) => {
-      if (a.level !== b.level) {
-        return a.level - b.level;
-      }
-      return b.score - a.score;
-    });
+    // Сортируем по очкам
+    bestResults.sort((a, b) => b.score - a.score);
     
     console.log('Fetched entries:', bestResults);
     return bestResults;
@@ -97,32 +90,3 @@ export const getLeaderboardEntries = async (): Promise<LeaderboardEntry[]> => {
     return [];
   }
 };
-
-export const saveUserAchievement = async (userId: string, achievement: UserAchievement): Promise<void> => {
-  try {
-    const userAchievementsRef = ref(db, `users/${userId}/achievements`);
-    await push(userAchievementsRef, achievement);
-  } catch (error) {
-    console.error('Error saving achievement:', error);
-    throw error;
-  }
-};
-
-export const getUserAchievements = async (userId: string): Promise<UserAchievement[]> => {
-  try {
-    const userAchievementsRef = ref(db, `users/${userId}/achievements`);
-    const snapshot = await get(userAchievementsRef);
-    
-    if (!snapshot.exists()) return [];
-
-    const achievements: UserAchievement[] = [];
-    snapshot.forEach((childSnapshot) => {
-      achievements.push(childSnapshot.val());
-    });
-
-    return achievements;
-  } catch (error) {
-    console.error('Error getting achievements:', error);
-    return [];
-  }
-}; 

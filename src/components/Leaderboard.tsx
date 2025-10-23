@@ -11,12 +11,9 @@ import {
   Paper,
   Button,
   Box,
-  Typography,
-  Tabs,
-  Tab
+  Typography
 } from '@mui/material';
-import { useState } from 'react';
-import { LeaderboardEntry, LEVELS } from '../types/types';
+import { LeaderboardEntry } from '../types/types';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
@@ -27,12 +24,8 @@ interface LeaderboardProps {
 }
 
 const Leaderboard = ({ open, onClose, entries }: LeaderboardProps) => {
-  const [selectedLevel, setSelectedLevel] = useState(1);
-
-  // Фильтруем записи по выбранному уровню и сортируем по очкам
-  const filteredEntries = entries
-    .filter(entry => entry.level === selectedLevel)
-    .sort((a, b) => b.score - a.score);
+  // Сортируем записи по очкам
+  const sortedEntries = entries.sort((a, b) => b.score - a.score);
 
   const getMedalColor = (index: number) => {
     switch(index) {
@@ -70,31 +63,12 @@ const Leaderboard = ({ open, onClose, entries }: LeaderboardProps) => {
             Таблица рекордов
           </Typography>
         </Box>
-        
-        <Tabs
-          value={selectedLevel}
-          onChange={(_, newValue) => setSelectedLevel(newValue)}
-          sx={{ 
-            bgcolor: 'background.paper',
-            borderRadius: 2,
-            '& .MuiTab-root': { minWidth: 100 }
-          }}
-        >
-          {Object.keys(LEVELS).map((level) => (
-            <Tab 
-              key={level}
-              label={`Уровень ${level}`}
-              value={Number(level)}
-              sx={{ fontWeight: 'bold' }}
-            />
-          ))}
-        </Tabs>
       </DialogTitle>
 
       <DialogContent>
-        {filteredEntries.length === 0 ? (
+        {sortedEntries.length === 0 ? (
           <Typography variant="h6" sx={{ textAlign: 'center', my: 4, color: 'text.secondary' }}>
-            Пока нет результатов для уровня {selectedLevel}. Будьте первым! 🎮
+            Пока нет результатов. Будьте первым! 🎮
           </Typography>
         ) : (
           <TableContainer component={Paper} sx={{ 
@@ -114,7 +88,7 @@ const Leaderboard = ({ open, onClose, entries }: LeaderboardProps) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredEntries.map((entry, index) => (
+                {sortedEntries.map((entry, index) => (
                   <TableRow
                     key={`${entry.userId}-${entry.timestamp}`}
                     sx={{
