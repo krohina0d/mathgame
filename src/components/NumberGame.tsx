@@ -4,6 +4,7 @@ import { Cell, GameState, GAME_CONFIG, Pair, GAME_TIME, CORRECT_POINTS, MISTAKE_
 import { saveUser, getUser, saveLeaderboardEntry, getLeaderboardEntries } from '../services/storage';
 import { useSnackbar } from 'notistack';
 import CatCharacter, { CatState } from './CatCharacter';
+import FishRainGame from './FishRainGame';
 import fishImage from '../assets/fish.png';
 
 const NumberGame = () => {
@@ -24,6 +25,9 @@ const NumberGame = () => {
   const [hintPair, setHintPair] = useState<Pair | null>(null);
   const [selectedCell, setSelectedCell] = useState<Cell | null>(null);
   const [catState, setCatState] = useState<CatState>('waiting');
+  const [showFishRainGame, setShowFishRainGame] = useState(false);
+  const [lastScoreTrigger, setLastScoreTrigger] = useState(0);
+  const [playedLevels, setPlayedLevels] = useState<Set<number>>(new Set());
   const { enqueueSnackbar } = useSnackbar();
 
   const generateTargetNumber = useCallback((board: Cell[][]): number => {
@@ -208,6 +212,23 @@ const NumberGame = () => {
             
             // Котик радуется за правильную пару
             setCatState('happy');
+            
+            // Проверяем, нужно ли запустить мини-игру
+            const previousScore = prevState.score;
+            const previousMultiplier = Math.floor(previousScore / 20);
+            const newMultiplier = Math.floor(newScore / 20);
+            
+            // Запускаем мини-игру если:
+            // 1. Перешли на новый множитель (например, с 1 на 2 означает переход через 40)
+            // 2. Этот уровень еще не был сыгран
+            const justCrossedLevel = newMultiplier > previousMultiplier && newMultiplier > 0;
+            const isNewLevel = !playedLevels.has(newMultiplier);
+            
+            if (justCrossedLevel && isNewLevel) {
+              setPlayedLevels(prev => new Set([...prev, newMultiplier]));
+              setLastScoreTrigger(newScore);
+              setShowFishRainGame(true);
+            }
             
             const result = {
               ...prevState,
@@ -434,11 +455,13 @@ const NumberGame = () => {
     const foundPairs = gameState.foundPairs.filter(pair => pair.found);
     const ovals: JSX.Element[] = [];
 
-    // Используем те же константы, что и в createInteractiveSelection
-    const containerWidth = 300;
     const gap = 16; // gap: 2 = 16px
-    const cellWidth = (containerWidth - 2 * gap) / 3; // ~89.33px
     const cellHeight = 80; // фиксированная высота ячейки
+    
+    // Получаем позицию для колонки (в процентах)
+    const getColPosition = (col: number) => {
+      return col === 0 ? '16.67%' : col === 1 ? '50%' : '83.33%';
+    };
 
     foundPairs.forEach((pair, pairIndex) => {
       const cell1 = pair.cell1;
@@ -462,12 +485,18 @@ const NumberGame = () => {
 
       if (isHorizontal) {
         // Горизонтальная пара
-        const leftCol = Math.min(cell1.col, cell2.col);
-        const rightCol = Math.max(cell1.col, cell2.col);
-        
         const top = cell1.row * (cellHeight + gap) + (cellHeight - 64) / 2;
-        const left = leftCol * (cellWidth + gap) + (cellWidth - 64) / 2;
-        const width = (rightCol - leftCol) * (cellWidth + gap) + cellWidth;
+        const leftCell = Math.min(cell1.col, cell2.col);
+        const rightCell = Math.max(cell1.col, cell2.col);
+        
+        // Позиции центров колонок
+        const leftPos = getColPosition(leftCell);
+        const rightPos = getColPosition(rightCell);
+        
+        // Овал от центра левой колонки до центра правой
+        const startPos = `calc(${leftPos} - 32px)`;
+        const endPos = `calc(${rightPos} - 32px)`;
+        const width = `calc(${endPos} - ${startPos} + 64px)`;
         
         ovals.push(
           <Box
@@ -475,8 +504,8 @@ const NumberGame = () => {
             sx={{
               position: 'absolute',
               top: `${top}px`,
-              left: `${left}px`,
-              width: `${width}px`,
+              left: startPos,
+              width: width,
               height: '64px',
               borderRadius: '32px',
               backgroundColor: color,
@@ -493,8 +522,11 @@ const NumberGame = () => {
         const bottomRow = Math.max(cell1.row, cell2.row);
         
         const top = topRow * (cellHeight + gap) + (cellHeight - 64) / 2;
-        const left = cell1.col * (cellWidth + gap) + (cellWidth - 64) / 2;
         const height = (bottomRow - topRow) * (cellHeight + gap) + cellHeight;
+        
+        // Позиция центра колонки
+        const colPos = getColPosition(cell1.col);
+        const left = `calc(${colPos} - 32px)`;
         
         ovals.push(
           <Box
@@ -502,7 +534,7 @@ const NumberGame = () => {
             sx={{
               position: 'absolute',
               top: `${top}px`,
-              left: `${left}px`,
+              left: left,
               width: '64px',
               height: `${height}px`,
               borderRadius: '32px',
@@ -525,15 +557,24 @@ const NumberGame = () => {
     if (!selectedCell) return null;
 
     // Рассчитываем точную позицию с учетом CSS Grid
-    // Контейнер имеет maxWidth: 300px, gap: 2 (16px), 3 колонки
-    // Каждая ячейка: (300px - 2 * 16px) / 3 = 89.33px
-    const containerWidth = 300;
     const gap = 16; // gap: 2 = 16px
-    const cellWidth = (containerWidth - 2 * gap) / 3; // ~89.33px
-    const cellHeight = 80; // фиксированная высота ячейки
+    const cellHeight = 80; // высота ячейки
     
+    // Позиция по вертикали
     const top = selectedCell.row * (cellHeight + gap) + (cellHeight - 64) / 2;
-    const left = selectedCell.col * (cellWidth + gap) + (cellWidth - 64) / 2;
+    
+    // Позиция по горизонтали - используем простые проценты от контейнера Grid
+    let left;
+    // Процентное позиционирование от начала каждой колонки + offset для центрирования
+    if (selectedCell.col === 0) {
+      left = 'calc(0% + 16.67% - 32px)'; // 16.67% от начала контейнера
+    } else if (selectedCell.col === 1) {
+      left = 'calc(33.33% + 16.67% - 32px)'; // 50% от начала контейнера  
+    } else if (selectedCell.col === 2) {
+      left = 'calc(66.66% + 16.67% - 32px)'; // 83.33% от начала контейнера
+    } else {
+      left = 'calc(50% - 32px)';
+    }
 
     return (
       <Box
@@ -541,10 +582,10 @@ const NumberGame = () => {
         sx={{
           position: 'absolute',
           top: `${top}px`,
-          left: `${left}px`,
+          left: left,
           width: '64px',
           height: '64px',
-          borderRadius: '50%',
+          borderRadius: '50%', // Круг при выборе первого числа
           backgroundColor: 'rgba(33, 150, 243, 0.3)',
           background: 'linear-gradient(135deg, rgba(33, 150, 243, 0.4), rgba(33, 150, 243, 0.2))',
           boxShadow: '0 2px 8px rgba(33, 150, 243, 0.3)',
@@ -769,10 +810,34 @@ const NumberGame = () => {
           )}
         </Box>
 
+        {/* Информация о следующей мини-игре */}
+        {(() => {
+          const currentScore = gameState.score;
+          const currentLevel = Math.floor(currentScore / 20);
+          const nextPlayableLevel = Array.from({ length: 100 }, (_, i) => i + 1)
+            .find(level => level > currentLevel && !playedLevels.has(level)) || currentLevel + 1;
+          const targetScore = nextPlayableLevel * 20;
+          
+          return (
+            <Box sx={{
+              mt: 3,
+              mb: 2,
+              textAlign: 'center'
+            }}>
+              <Typography variant="body2" sx={{
+                color: '#666',
+                fontSize: '0.85rem'
+              }}>
+                Следующая мини-игра при {targetScore} очках
+              </Typography>
+            </Box>
+          );
+        })()}
+
         {/* Индикатор оставшихся пар */}
         <Box sx={{
           textAlign: 'center',
-          mt: 3
+          mt: 2
         }}>
           <Typography variant="h6" sx={{
             color: '#666',
@@ -782,6 +847,16 @@ const NumberGame = () => {
           </Typography>
         </Box>
       </Paper>
+
+      {/* Мини-игра с падающими рыбками */}
+      <FishRainGame
+        open={showFishRainGame}
+        onClose={() => setShowFishRainGame(false)}
+        onFinish={(earned) => {
+          console.log(`Поймано рыбок: ${earned}`);
+          setShowFishRainGame(false);
+        }}
+      />
     </Box>
   );
 };
